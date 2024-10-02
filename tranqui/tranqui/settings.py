@@ -34,19 +34,22 @@ ALLOWED_HOSTS = []
 
 # Application definition
 
+
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'rest_framework',
+    'rest_framework',   # for django REST framework
+    'drf_yasg',     # for swagger
+    'channels',     # for django channels
+    # custom django aaps
     'api',
-    'drf_yasg', # for swagger
 
 ]
-
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -75,7 +78,8 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'tranqui.wsgi.application'
+# WSGI_APPLICATION = 'tranqui.wsgi.application'
+ASGI_APPLICATION = "tranqui.asgi.application"
 
 
 # Database
@@ -142,3 +146,16 @@ REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'rest_framework.schemas.coreapi.AutoSchema'
 }
 LOGIN_URL = '/accounts/login/'
+AUTH_USER_MODEL = 'api.User'
+# myproject/settings.py
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'  # Change to your email provider
+EMAIL_PORT = 465
+EMAIL_USE_TLS = True
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
