@@ -18,10 +18,8 @@ class UserManager(BaseUserManager):
         user = self.model(email=email, **extra_fields)
 
         if password is None:
-            password = self.generate_random_password()  # Generate a random password if not provided
-
-        user.set_password(password)  # Set hashed password
-        user.save(using=self._db)
+            password = self.generate_random_password()
+        user.set_password(password)
         return user
 
     def create_superuser(self, email, password=None, **extra_fields):
@@ -69,11 +67,16 @@ class OTP(models.Model):
         return (timezone.now() - self.created_at).seconds <= 3600  # Valid for 1 hour
 
 
-class Chatbot(models.Model):
+class Chat(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
     prompt = models.TextField()
     response = models.TextField()
-    feedback = models.BooleanField(null=True, blank=True)
+    session_id = models.CharField(max_length=100, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    total_tokens = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "api_chat"
 
     def __str__(self):
-        return self.prompt
+        return f"Chat {self.id} - User {self.user.username}"

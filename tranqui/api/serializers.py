@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from .utils import get_google_user_info
-from .models import User, OTP
+from .models import User, OTP, Chat
 
 
 # Serializer for registering a new user
@@ -177,10 +177,11 @@ class GoogleSignInSerializer(serializers.Serializer):
 
 
 class ChatRequestSerializer(serializers.Serializer):
-    prompt = serializers.CharField(required=True)
+    session_id = serializers.CharField(max_length=100, required=False, allow_null=True)
+    prompt = serializers.CharField()
 
 
-class ChatResponseSerializer(serializers.Serializer):
-    message = serializers.CharField()
-    success = serializers.BooleanField(default=True)  # Indicates if the operation was successful
-    error = serializers.CharField(allow_blank=True, required=False)
+class ChatSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Chat
+        fields = ['id', 'user', 'session_id', 'prompt', 'total_tokens', 'response']

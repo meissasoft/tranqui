@@ -50,7 +50,7 @@ def send_verification_email(email, otp_code):
     try:
         print(EMAIL_SENDER, EMAIL_PASSWORD)
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(EMAIL_SENDER, "xtmr tqhv omjn epny")  # Use App Password
+            server.login(EMAIL_SENDER, "xtmr tqhv omjn epny")
             server.sendmail(EMAIL_SENDER, email, msg.as_string())
         print("Email sent successfully!")
     except smtplib.SMTPAuthenticationError as e:
@@ -74,5 +74,5 @@ def get_google_user_info(token: str):
     response = requests.get(
         userinfo_endpoint, headers={"Authorization": f"Bearer {token}"}
     )
-    response.raise_for_status()  # Raise an error for bad responses (4xx or 5xx)
+    response.raise_for_status()
     return response.json()

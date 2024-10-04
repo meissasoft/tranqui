@@ -2,17 +2,17 @@ import os
 from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
-from api.consumers import ChatbotConsumer  # Adjust the import based on your project structure
-from django.urls import path
+from api.consumers import ChatbotConsumer
+from django.urls import re_path
+from api.jwt_middleware import JWTAuthenticationMiddleware
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'yourproject.settings')  # Change 'yourproject' to your actual project name
-
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'tranqui.settings')
 application = ProtocolTypeRouter({
     "http": get_asgi_application(),
-    "websocket": AuthMiddlewareStack(
+    "websocket": JWTAuthenticationMiddleware(
         URLRouter(
             [
-                path('ws/chat/', ChatbotConsumer.as_asgi()),  # Ensure this matches your WebSocket URL
+                re_path(r'ws/chat/(?P<session_id>\w+)?$', ChatbotConsumer.as_asgi()),  # session_id is optional
             ]
         )
     ),

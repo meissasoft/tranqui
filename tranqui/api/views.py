@@ -7,7 +7,7 @@ from .serializers import *
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import User, OTP
+from .models import User, OTP, Chat
 import random
 
 
@@ -182,7 +182,6 @@ class VerifyOTPView(generics.CreateAPIView):
 
 
 class ValidateResetCodeView(generics.GenericAPIView):
-
     serializer_class = ValidateResetCodeSerializer
 
     def post(self, request, *args, **kwargs):
@@ -269,3 +268,28 @@ class WebSocketDocView(APIView):
 
     def get(self, request, *args, **kwargs):
         return Response({"message": "WebSocket API documentation"})
+
+
+class GetAllChatsView(generics.ListAPIView):
+    """
+    Retrieves all chats for the authenticated user.
+    """
+    serializer_class = ChatSerializer
+
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        chats = Chat.objects.filter(user=user)
+        serializer = self.get_serializer(chats, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class GetChatsBySessionIDView(generics.ListAPIView):
+    """
+    Retrieves chats for a specific session ID.
+    """
+    serializer_class = ChatSerializer
+
+    def get(self, request, session_id, *args, **kwargs):
+        chats = Chat.objects.filter(session_id=session_id)
+        serializer = self.get_serializer(chats, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
