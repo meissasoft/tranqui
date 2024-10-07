@@ -40,7 +40,8 @@ class LoginView(generics.GenericAPIView):
             user = User.objects.get(email=email)
             user = authenticate(request, email=email, password=password)
             if user is not None:
-                return Response({"message": "Login successful!"}, status=status.HTTP_200_OK)
+                token = get_jwt_token(user)
+                return Response({"message": "Login successful!", "token(access)": token.get('access')}, status=status.HTTP_200_OK)
             else:
                 return Response({"message": "Invalid password."}, status=status.HTTP_400_BAD_REQUEST)
         except User.DoesNotExist:
@@ -178,7 +179,7 @@ class VerifyOTPView(generics.CreateAPIView):
         user.is_verified = True
         user.save()
         token = get_jwt_token(user)
-        return Response({"msg": "OTP verified", "token": token}, status=status.HTTP_200_OK)
+        return Response({"msg": "OTP verified", "token(access)": token.get('access')}, status=status.HTTP_200_OK)
 
 
 class ValidateResetCodeView(generics.GenericAPIView):

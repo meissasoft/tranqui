@@ -13,8 +13,8 @@ from openai import OpenAI, OpenAIError
 
 logger = logging.getLogger(__name__)
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
-OPENAI_TOKEN_LIMIT = int(getattr(settings, "OPENAI_TOKEN_LIMIT", 5000))
-TOKEN_PER_WORD = float(getattr(settings, "TOKEN_PER_WORD", 0.57))
+OPENAI_TOKEN_LIMIT = settings.OPENAI_TOKEN_LIMIT
+TOKEN_PER_WORD = settings.TOKEN_PER_WORD
 
 
 async def get_user(username):
