@@ -204,14 +204,14 @@ class ValidateResetCodeView(generics.GenericAPIView):
         serializer.is_valid(raise_exception=True)
 
         otp = serializer.validated_data['otp']
-        password = serializer.validated_data['password']
+        password = serializer.validated_data['new_password']
         otp_record = OTP.objects.get(otp=otp)
         email = otp_record.email
         try:
             user = User.objects.get(email=email)
             user.set_password(password)
             user.save()
-            return Response({"message": "Password has been reset successfully."}, status=status.HTTP_200_OK)
+            return Response({"message": "Password has been updated successfully."}, status=status.HTTP_200_OK)
         except User.DoesNotExist:
             return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 

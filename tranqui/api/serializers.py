@@ -6,8 +6,6 @@ from .models import User, OTP, Chat
 
 # Serializer for registering a new user
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
-
     class Meta:
         model = User
         fields = ['username', 'email', 'password']
@@ -65,7 +63,6 @@ class ProfileUpdateSerializer(serializers.Serializer):
 
 class ResetPasswordSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    new_password = serializers.CharField(min_length=8)
 
     def validate_email(self, value):
         """
@@ -120,7 +117,7 @@ class VerifyOTPSerializer(serializers.Serializer):
 # Serializer for validating the OTP code and resetting the password
 class ValidateResetCodeSerializer(serializers.Serializer):
     otp = serializers.CharField(max_length=6)
-    password = serializers.CharField(min_length=8)  # Adjust length as necessary
+    new_password = serializers.CharField(min_length=8)  # Adjust length as necessary
 
     def validate_otp(self, value):
         """
