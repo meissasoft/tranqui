@@ -9,7 +9,7 @@ https://docs.djangoproject.com/en/5.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
-
+from datetime import timedelta
 import os
 from dotenv import load_dotenv
 
@@ -25,6 +25,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-gud17viih(xlfdu^yi#0z7n4u8ab0h2l^z3$rc44b_s#pn7i4)'
+
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -163,3 +164,9 @@ CHANNEL_LAYERS = {
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 OPENAI_TOKEN_LIMIT = os.environ.get('OPENAI_TOKEN_LIMIT')
 TOKEN_PER_WORD = os.environ.get('TOKEN_PER_WORD')
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+}
