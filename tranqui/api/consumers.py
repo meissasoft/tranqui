@@ -22,7 +22,7 @@ async def get_user(username):
     return await database_sync_to_async(User.objects.get)(username=username)
 
 
-def generate_random_session_id(length=10):
+async def generate_random_session_id(length=10):
     """Generate a random session ID of the specified length."""
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
@@ -89,12 +89,12 @@ class ChatbotConsumer(AsyncWebsocketConsumer):
             except OpenAIError as e:
                 logger.error(f"OpenAI API error: {str(e)}")
                 return "Sorry, there was an issue with the OpenAI API."
-            response_dict = object_to_dict(response)
+            response_dict = await object_to_dict(response)
             if session_id:
                 assistant_response = response_dict['choices'][0]['message']['content']
             else:
                 assistant_response = response_dict['choices'][0]['message']['content']
-                session_id = generate_random_session_id()
+                session_id = await generate_random_session_id()
             total_tokens = calculate_token_count(assistant_response)
             await self.save_chat_response(user, prompt, assistant_response, session_id, total_tokens)
             return assistant_response
@@ -141,7 +141,7 @@ class ChatbotConsumer(AsyncWebsocketConsumer):
         chat.save()
 
 
-def object_to_dict(obj):
+async def object_to_dict(obj):
     """
     Convert an object to a dictionary, handling nested objects and lists.
     """
