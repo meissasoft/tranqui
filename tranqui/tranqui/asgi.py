@@ -2,7 +2,9 @@ import os
 from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
-from api.consumers import ChatbotConsumer
+# from api.consumers import ChatbotConsumer
+from api.speech_to_speech_consumer import SpeechConsumer
+
 from django.urls import re_path
 from api.jwt_middleware import JWTAuthenticationMiddleware
 
@@ -12,7 +14,7 @@ application = ProtocolTypeRouter({
     "websocket": JWTAuthenticationMiddleware(
         URLRouter(
             [
-                re_path(r'ws/chat/(?P<session_id>\w+)?$', ChatbotConsumer.as_asgi()),  # session_id is optional
+                re_path(r'ws/chat/(?P<session_id>\w+)?$', SpeechConsumer.as_asgi()),  # session_id is optional
             ]
         )
     ),

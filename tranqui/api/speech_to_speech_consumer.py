@@ -1,20 +1,27 @@
+from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.db import database_sync_to_async
+from .serializers import ChatRequestSerializer
+from django.utils import timezone
+from django.conf import settings
+from .models import User, Chat
+from openai import OpenAI, OpenAIError
 import json
 import logging
 import math
 import string
+import base64
 import random
-from django.utils import timezone
-from channels.generic.websocket import AsyncWebsocketConsumer
-from channels.db import database_sync_to_async
-from .serializers import ChatRequestSerializer
-from django.conf import settings
-from .models import User, Chat
-from openai import OpenAI, OpenAIError
+import asyncio
+import os
 
 logger = logging.getLogger(__name__)
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 OPENAI_TOKEN_LIMIT = settings.OPENAI_TOKEN_LIMIT
 TOKEN_PER_WORD = settings.TOKEN_PER_WORD
+SPEECH_FILE_PATH = "api/speech.mp3"
+INPUT_FILE_PATH = "api/input.mp3"
+BATCH_SIZE = 5
+
 
 
 async def get_user(username):
@@ -22,12 +29,12 @@ async def get_user(username):
     return await database_sync_to_async(User.objects.get)(username=username)
 
 
-async def generate_random_session_id(length=10):
+def generate_random_session_id(length=10):
     """Generate a random session ID of the specified length."""
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
 
-class ChatbotConsumer(AsyncWebsocketConsumer):
+class SpeechConsumer(AsyncWebsocketConsumer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.user = None
@@ -37,13 +44,14 @@ class ChatbotConsumer(AsyncWebsocketConsumer):
         """Handle WebSocket connection."""
         self.session_id = self.scope['url_route']['kwargs'].get('session_id')
         self.user = self.scope.get('user')
-        print(self.user, "user")
-        if self.user is not None and self.user.is_authenticated:
+  
+        if self.user is not None :#and self.user.is_authenticated:
             await self.accept()
             logger.info(f"User {self.user.username} connected via WebSocket.")
             await self.send(text_data=json.dumps({"message": "WebSocket connection established"}))
         else:
             await self.close()
+
 
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection."""
@@ -53,14 +61,27 @@ class ChatbotConsumer(AsyncWebsocketConsumer):
     async def receive(self, text_data=None, bytes_data=None):
         """Handle incoming WebSocket messages asynchronously."""
         try:
-            text_data_json = json.loads(text_data)
+            audio = False
+            if bytes_data is not None and text_data is None:
+
+                with open(INPUT_FILE_PATH, 'wb') as file:
+                    file.write(bytes_data)
+                transcribed_text = await self.transcribe_audio(INPUT_FILE_PATH)
+                os.remove(INPUT_FILE_PATH)
+                audio = True
+                text_data_json = {
+                    "prompt": transcribed_text
+                }
+            elif bytes_data is None and text_data is not None:
+
+                text_data_json = json.loads(text_data)
             serializer_data = {
                 'session_id': self.session_id,
                 'prompt': text_data_json.get('prompt'),
             }
             serializer = ChatRequestSerializer(data=serializer_data)
             serializer.is_valid(raise_exception=True)
-            response_content = await self.process_prompt(serializer.validated_data, user=self.user)
+            response_content = await self.process_prompt(serializer.validated_data, user=self.user,audio=audio)
             await self.send(text_data=json.dumps(response_content))
 
         except json.JSONDecodeError:
@@ -70,32 +91,68 @@ class ChatbotConsumer(AsyncWebsocketConsumer):
             logger.exception("Error in WebSocket receive method.")
             await self.send(text_data=json.dumps({'error': 'An unexpected error occurred.'}))
 
-    async def process_prompt(self, validated_data, user):
+    async def process_prompt(self, validated_data, user, audio):
         """Process the user prompt and send it to OpenAI API."""
         try:
             prompt = validated_data['prompt']
+
             session_id = self.session_id
             if session_id:
                 chats = await self.get_chats_by_session_id(user, session_id)
                 reference_chunk = await self.get_token_limited_chats(chats)
                 messages = reference_chunk
+                
             else:
                 messages = []
+            
             messages.append({"role": "user", "content": prompt})
+            print(messages)
             try:
-                response = client.chat.completions.create(
+                if audio:
+                    if os.path.exists(SPEECH_FILE_PATH):
+                        os.remove(SPEECH_FILE_PATH)
+                    response = client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=messages,
+                        stream = True
+                    )
+                    batch =[]
+                    complete_response=[]
+
+                    for chunk in response:
+                        if chunk.choices[0].delta.content is not None:
+                            batch.append(chunk.choices[0].delta.content)
+                            if len(batch) >= BATCH_SIZE:
+                                text_chunk= " ".join(batch)
+                                try:
+                                    await self.text_to_speech(text_chunk)
+                                except Exception as e:
+                                    logger.error(f"Speech to text conversion error: {str(e)}")
+                                    return "Sorry, there was in converting speech to text."
+                                complete_response.extend(batch)
+                                batch=[]
+
+                    if batch:
+                        text_chunk = " ".join(batch)  
+                        if len(batch) > 0:  
+                            await self.text_to_speech(text_chunk) 
+                    complete_response.extend(batch) 
+                    assistant_response = " ".join(complete_response)
+                else:
+                    response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=messages
-                )
+                    )
+                    response_dict = object_to_dict(response)
+                    
+                    assistant_response = response_dict['choices'][0]['message']['content']
+                if not session_id:
+                    session_id = generate_random_session_id()      
+
             except OpenAIError as e:
                 logger.error(f"OpenAI API error: {str(e)}")
                 return "Sorry, there was an issue with the OpenAI API."
-            response_dict = await object_to_dict(response)
-            if session_id:
-                assistant_response = response_dict['choices'][0]['message']['content']
-            else:
-                assistant_response = response_dict['choices'][0]['message']['content']
-                session_id = await generate_random_session_id()
+        
             total_tokens = calculate_token_count(assistant_response)
             await self.save_chat_response(user, prompt, assistant_response, session_id, total_tokens)
             return assistant_response
@@ -105,7 +162,39 @@ class ChatbotConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.exception(f"Error in chat processing: {e}")
             return "Sorry, I couldn't process your request at the moment."
+        
+    async def transcribe_audio(self,file_path):
+        """Transcribe incoming voice note"""
+        audio_file= open(file_path, "rb")
+        
+        transcription = client.audio.transcriptions.create(
+        model="whisper-1", 
+        file=audio_file
+        )
+        return transcription.text
+    
+    async def text_to_speech(self, text_chunk, model="tts-1", voice="alloy", buffer_size=1024):
+        """Generate speech from text and send the audio data, also save it to a file."""
+        try:
+            with open(SPEECH_FILE_PATH, "ab") as audio_file:
+                response = client.audio.speech.create(
+                    model=model,
+                    voice=voice,
+                    input=text_chunk,
+                )
 
+                for data in response.iter_bytes(buffer_size):
+                    await self.send(bytes_data=data)  
+                    audio_file.write(data)  
+                    await asyncio.sleep(0)
+        
+        except ConnectionError as ce:
+            logging.error(f"Connection error occurred: {ce}")
+        except ValueError as ve:
+            logging.error(f"Value error: {ve}")
+        except Exception as e:
+            logging.error(f"An unexpected error occurred: {e}")
+        
     @database_sync_to_async
     def get_chats_by_session_id(self, user, session_id):
         """Fetch all chats for a given user and session ID."""
@@ -142,7 +231,7 @@ class ChatbotConsumer(AsyncWebsocketConsumer):
         chat.save()
 
 
-async def object_to_dict(obj):
+def object_to_dict(obj):
     """
     Convert an object to a dictionary, handling nested objects and lists.
     """
@@ -156,4 +245,4 @@ async def object_to_dict(obj):
 
 def calculate_token_count(messages: str) -> int:
     # 750 tokens per 1000 words which equals to 0.75 token per word
-    return math.ceil(len(messages.split()) * int(TOKEN_PER_WORD))
+    return math.ceil(len(messages.split()) * float(TOKEN_PER_WORD))
