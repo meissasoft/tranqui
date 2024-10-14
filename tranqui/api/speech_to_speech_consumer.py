@@ -45,7 +45,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         self.session_id = self.scope['url_route']['kwargs'].get('session_id')
         self.user = self.scope.get('user')
   
-        if self.user is not None :#and self.user.is_authenticated:
+        if self.user is not None and self.user.is_authenticated:
             await self.accept()
             logger.info(f"User {self.user.username} connected via WebSocket.")
             await self.send(text_data=json.dumps({"message": "WebSocket connection established"}))
@@ -106,7 +106,6 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                 messages = []
             
             messages.append({"role": "user", "content": prompt})
-            print(messages)
             try:
                 if audio:
                     if os.path.exists(SPEECH_FILE_PATH):
@@ -116,35 +115,33 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                         messages=messages,
                         stream = True
                     )
-                    batch =[]
-                    complete_response=[]
-
+                    batch_count = 0
+                    complete_response=""
+                    response_string=""
                     for chunk in response:
                         if chunk.choices[0].delta.content is not None:
-                            batch.append(chunk.choices[0].delta.content)
-                            if len(batch) >= BATCH_SIZE:
-                                text_chunk= " ".join(batch)
+                            response_string = response_string + chunk.choices[0].delta.content
+                            batch_count +=1
+                            if batch_count >= BATCH_SIZE:
                                 try:
-                                    await self.text_to_speech(text_chunk)
+                                    await self.text_to_speech(response_string)
                                 except Exception as e:
                                     logger.error(f"Speech to text conversion error: {str(e)}")
-                                    return "Sorry, there was in converting speech to text."
-                                complete_response.extend(batch)
-                                batch=[]
+                                    return "Sorry, there was error  in converting speech to text."
+                                complete_response = complete_response + response_string
+                                response_string = ""
+                                batch_count = 0
 
-                    if batch:
-                        text_chunk = " ".join(batch)  
-                        if len(batch) > 0:  
-                            await self.text_to_speech(text_chunk) 
-                    complete_response.extend(batch) 
-                    assistant_response = " ".join(complete_response)
+                    if batch_count != 0:
+                        await self.text_to_speech(response_string) 
+                    complete_response = complete_response + response_string
+                    assistant_response = complete_response
                 else:
                     response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=messages
                     )
                     response_dict = object_to_dict(response)
-                    
                     assistant_response = response_dict['choices'][0]['message']['content']
                 if not session_id:
                     session_id = generate_random_session_id()      
@@ -152,6 +149,9 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             except OpenAIError as e:
                 logger.error(f"OpenAI API error: {str(e)}")
                 return "Sorry, there was an issue with the OpenAI API."
+            except Exception as e:
+                logger.error(f"Error in parsing chat completion response: {str(e)}")
+                return "Sorry, there was an issue in handling response."
         
             total_tokens = calculate_token_count(assistant_response)
             await self.save_chat_response(user, prompt, assistant_response, session_id, total_tokens)
