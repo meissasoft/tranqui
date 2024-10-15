@@ -1,3 +1,4 @@
+from datetime import datetime
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from .serializers import ChatRequestSerializer
@@ -23,7 +24,6 @@ INPUT_FILE_PATH = "api/input.mp3"
 BATCH_SIZE = 5
 
 
-
 async def get_user(username):
     """Get a User instance by username asynchronously."""
     return await database_sync_to_async(User.objects.get)(username=username)
@@ -44,18 +44,62 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         """Handle WebSocket connection."""
         self.session_id = self.scope['url_route']['kwargs'].get('session_id')
         self.user = self.scope.get('user')
-  
+
         if self.user is not None and self.user.is_authenticated:
             await self.accept()
             logger.info(f"User {self.user.username} connected via WebSocket.")
             await self.send(text_data=json.dumps({"message": "WebSocket connection established"}))
+            greeting_message = self.get_greeting()
+            await self.send(text_data=json.dumps({"message": greeting_message}))
         else:
             await self.close()
 
+    def get_greeting(self):
+        """Returns a short greeting based on the time of day and user's name."""
+        current_hour = datetime.now().hour
+        chatbot_name = settings.CHATBOT_NAME  # Fetch chatbot name from .env
+
+        # Determine greeting based on the time of day
+        if 5 <= current_hour < 12:
+            time_greeting = "Good morning"
+        elif 12 <= current_hour < 17:
+            time_greeting = "Good afternoon"
+        elif 17 <= current_hour < 20:
+            time_greeting = "Good evening"
+        else:
+            time_greeting = "Good night"
+
+        # Define 20 short, user-friendly greetings
+        greetings = [
+            f"{time_greeting}, {self.user.username}! I’m {chatbot_name}. How’s your day going?",
+            f"Hello, {self.user.username}! It’s {chatbot_name}. What’s on your mind today?",
+            f"Hey {self.user.username}, {chatbot_name} here. How have you been?",
+            f"Hi {self.user.username}, {chatbot_name} at your service! How can I assist?",
+            f"{time_greeting}, {self.user.username}! Ready for a great conversation?",
+            f"Hello {self.user.username}! {chatbot_name} here. Let’s make today productive!",
+            f"Hey {self.user.username}, hope you’re doing well! {chatbot_name} here to help.",
+            f"{time_greeting}, {self.user.username}! How’s everything going on your end?",
+            f"Hi {self.user.username}, {chatbot_name} here. How can I make your day easier?",
+            f"Hey {self.user.username}! Let me know if you need help with anything.",
+            f"Hi {self.user.username}, it’s {chatbot_name}. How’s your day been so far?",
+            f"{time_greeting}, {self.user.username}. What can I do for you today?",
+            f"Hello {self.user.username}! {chatbot_name} here. How’s everything going?",
+            f"Hey {self.user.username}, {chatbot_name} here. Ready to chat?",
+            f"Hi {self.user.username}! How’s everything going today? {chatbot_name} is here to assist.",
+            f"{time_greeting}, {self.user.username}! Hope you’re doing great. What’s on your mind?",
+            f"Hello {self.user.username}! How’s your day? {chatbot_name} is here for you.",
+            f"Hey {self.user.username}, it’s {chatbot_name}! How can I assist today?",
+            f"Hi {self.user.username}, hope you’re having a good one! Let’s chat if you need anything.",
+            f"{time_greeting}, {self.user.username}. How can I make your day better today?",
+        ]
+
+        # Randomly choose one greeting
+        return random.choice(greetings)
 
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection."""
         logger.info(f"User {self.user.username} disconnected from WebSocket.")
+        await self.close()
         pass
 
     async def receive(self, text_data=None, bytes_data=None):
@@ -111,17 +155,17 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                     if os.path.exists(SPEECH_FILE_PATH):
                         os.remove(SPEECH_FILE_PATH)
                     response = client.chat.completions.create(
-                        model="gpt-4o",
+                        model="gpt-3.5-turbo",
                         messages=messages,
-                        stream = True
+                        stream=True
                     )
                     batch_count = 0
-                    complete_response=""
-                    response_string=""
+                    complete_response = ""
+                    response_string = ""
                     for chunk in response:
                         if chunk.choices[0].delta.content is not None:
                             response_string = response_string + chunk.choices[0].delta.content
-                            batch_count +=1
+                            batch_count += 1
                             if batch_count >= BATCH_SIZE:
                                 try:
                                     await self.text_to_speech(response_string)
@@ -133,18 +177,18 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                                 batch_count = 0
 
                     if batch_count != 0:
-                        await self.text_to_speech(response_string) 
+                        await self.text_to_speech(response_string)
                     complete_response = complete_response + response_string
                     assistant_response = complete_response
                 else:
                     response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=messages
+                        model="gpt-4o",
+                        messages=messages
                     )
                     response_dict = object_to_dict(response)
                     assistant_response = response_dict['choices'][0]['message']['content']
                 if not session_id:
-                    session_id = generate_random_session_id()      
+                    session_id = generate_random_session_id()
 
             except OpenAIError as e:
                 logger.error(f"OpenAI API error: {str(e)}")
@@ -152,7 +196,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             except Exception as e:
                 logger.error(f"Error in parsing chat completion response: {str(e)}")
                 return "Sorry, there was an issue in handling response."
-        
+
             total_tokens = calculate_token_count(assistant_response)
             await self.save_chat_response(user, prompt, assistant_response, session_id, total_tokens)
             return assistant_response
@@ -162,17 +206,17 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.exception(f"Error in chat processing: {e}")
             return "Sorry, I couldn't process your request at the moment."
-        
-    async def transcribe_audio(self,file_path):
+
+    async def transcribe_audio(self, file_path):
         """Transcribe incoming voice note"""
-        audio_file= open(file_path, "rb")
-        
+        audio_file = open(file_path, "rb")
+
         transcription = client.audio.transcriptions.create(
-        model="whisper-1", 
-        file=audio_file
+            model="whisper-1",
+            file=audio_file
         )
         return transcription.text
-    
+
     async def text_to_speech(self, text_chunk, model="tts-1", voice="alloy", buffer_size=1024):
         """Generate speech from text and send the audio data, also save it to a file."""
         try:
@@ -184,17 +228,17 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                 )
 
                 for data in response.iter_bytes(buffer_size):
-                    await self.send(bytes_data=data)  
-                    audio_file.write(data)  
+                    await self.send(bytes_data=data)
+                    audio_file.write(data)
                     await asyncio.sleep(0)
-        
+
         except ConnectionError as ce:
             logging.error(f"Connection error occurred: {ce}")
         except ValueError as ve:
             logging.error(f"Value error: {ve}")
         except Exception as e:
             logging.error(f"An unexpected error occurred: {e}")
-        
+
     @database_sync_to_async
     def get_chats_by_session_id(self, user, session_id):
         """Fetch all chats for a given user and session ID."""
