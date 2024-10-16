@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import parse_qs
 
 import jwt
 from django.conf import settings
@@ -21,11 +22,11 @@ class JWTAuthenticationMiddleware(BaseMiddleware):
     async def __call__(self, scope, receive, send):
         path = scope.get('path', '')
         if path.startswith('/ws/'):
-            headers = dict(scope['headers'])
-            token = headers.get(b'authorization')
+            query_string = scope.get('query_string', b'').decode('utf-8')
+            query_params = parse_qs(query_string)
+            token = query_params.get('token', [None])[0]
             if token:
                 try:
-                    token = token.decode()
                     payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
                     scope['user'] = await get_user(payload['user_id'])
                 except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, KeyError) as e:
