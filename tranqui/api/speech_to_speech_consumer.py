@@ -102,6 +102,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection."""
         logger.info(f"User {self.user.username} disconnected from WebSocket.")
+        if os.path.exists(SPEECH_FILE_PATH):
             os.remove(SPEECH_FILE_PATH)
         await self.close()
         pass
@@ -127,7 +128,6 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                 'session_id': self.session_id,
                 'prompt': text_data_json.get('prompt'),
             }
-            print("bytes_data", bytes_data)
             serializer = ChatRequestSerializer(data=serializer_data)
             serializer.is_valid(raise_exception=True)
             response_content = await self.process_prompt(serializer.validated_data, user=self.user, audio=audio)
@@ -157,7 +157,6 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             messages.append({"role": "user", "content": prompt})
             try:
                 if audio:
-                    if os.path.exists(SPEECH_FILE_PATH):
                     response = client.chat.completions.create(
                         model="gpt-3.5-turbo",
                         messages=messages,
