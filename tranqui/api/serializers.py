@@ -184,6 +184,14 @@ class ChatRequestSerializer(serializers.Serializer):
         if not value.strip():
             raise serializers.ValidationError("Prompt cannot be empty.")
         return value
+    def validate_data(self, value):
+        # Try to decode the base64 string to see if it's valid binary data
+        try:
+            base64.b64decode(value)
+            return value  
+        except (binascii.Error, ValueError) as e:
+            print("error in chat request serializer", e)
+            return value
 
 
 # Serializer for the chat model
