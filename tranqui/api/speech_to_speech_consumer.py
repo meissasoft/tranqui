@@ -102,6 +102,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection."""
         logger.info(f"User {self.user.username} disconnected from WebSocket.")
+            os.remove(SPEECH_FILE_PATH)
         await self.close()
         pass
 
@@ -110,29 +111,23 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         try:
             audio = False
             if bytes_data is not None and text_data is None:
-                print("bytes data received")
-                print("bytes_data", bytes_data)
-
-                base64_data = base64.b64encode(bytes_data)
+                logger.info("bytes data received")
                 with open(INPUT_FILE_PATH, 'wb') as file:
-                    file.write(base64_data)
+                    file.write(bytes_data)
                 transcribed_text = await self.transcribe_audio(INPUT_FILE_PATH)
-                os.remove(INPUT_FILE_PATH)
                 audio = True
                 text_data_json = {
                     "prompt": transcribed_text
                 }
-                print("base64_data", base64_data)
 
             elif bytes_data is None and text_data is not None:
-                print("text data received")
+                logger.info("text data received")
                 text_data_json = json.loads(text_data)
             serializer_data = {
                 'session_id': self.session_id,
                 'prompt': text_data_json.get('prompt'),
             }
             print("bytes_data", bytes_data)
-            print("text_data", text_data)
             serializer = ChatRequestSerializer(data=serializer_data)
             serializer.is_valid(raise_exception=True)
             response_content = await self.process_prompt(serializer.validated_data, user=self.user, audio=audio)
@@ -163,7 +158,6 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             try:
                 if audio:
                     if os.path.exists(SPEECH_FILE_PATH):
-                        os.remove(SPEECH_FILE_PATH)
                     response = client.chat.completions.create(
                         model="gpt-3.5-turbo",
                         messages=messages,
@@ -226,14 +220,8 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                 file=audio_file
             )
             return transcription.text
-        except openai.BadRequestError as e:
-            logger.error(f"Error in transcription: {e}")
-            file_name = os.path.basename(file_path)
-            mime_type, _ = mimetypes.guess_type(file_path)
-            print(f"File Name: {file_name}")
-            print(f"File Type (MIME): {mime_type}")
-        finally:
-            audio_file.close()
+        except (Exception, openai.BadRequestError) as e:
+            raise e
 
     async def text_to_speech(self, text_chunk, model="tts-1", voice="alloy", buffer_size=1024):
         """Generate speech from text and send the audio data, also save it to a file."""
