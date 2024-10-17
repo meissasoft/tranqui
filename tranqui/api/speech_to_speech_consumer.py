@@ -108,14 +108,17 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             audio = False
             if bytes_data is not None and text_data is None:
                 print("bytes data received")
+                base64_data = base64.b64encode(bytes_data).decode('utf-8')
                 with open(INPUT_FILE_PATH, 'wb') as file:
-                    file.write(bytes_data)
+                    file.write(base64_data)
                 transcribed_text = await self.transcribe_audio(INPUT_FILE_PATH)
                 os.remove(INPUT_FILE_PATH)
                 audio = True
                 text_data_json = {
                     "prompt": transcribed_text
                 }
+                print("base64_data", base64_data)
+
             elif bytes_data is None and text_data is not None:
                 print("text data received")
                 text_data_json = json.loads(text_data)
