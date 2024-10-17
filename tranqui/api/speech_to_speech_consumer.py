@@ -1,4 +1,7 @@
+import mimetypes
 from datetime import datetime
+
+import openai
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from .serializers import ChatRequestSerializer
@@ -132,7 +135,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             print("text_data", text_data)
             serializer = ChatRequestSerializer(data=serializer_data)
             serializer.is_valid(raise_exception=True)
-            response_content = await self.process_prompt(serializer.validated_data, user=self.user,audio=audio)
+            response_content = await self.process_prompt(serializer.validated_data, user=self.user, audio=audio)
             await self.send(text_data=json.dumps(response_content))
 
         except json.JSONDecodeError:
@@ -152,10 +155,10 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                 chats = await self.get_chats_by_session_id(user, session_id)
                 reference_chunk = await self.get_token_limited_chats(chats)
                 messages = reference_chunk
-                
+
             else:
                 messages = []
-            
+
             messages.append({"role": "user", "content": prompt})
             try:
                 if audio:
@@ -217,12 +220,20 @@ class SpeechConsumer(AsyncWebsocketConsumer):
     async def transcribe_audio(self, file_path):
         """Transcribe incoming voice note"""
         audio_file = open(file_path, "rb")
-
-        transcription = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file
-        )
-        return transcription.text
+        try:
+            transcription = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
+            return transcription.text
+        except openai.BadRequestError as e:
+            logger.error(f"Error in transcription: {e}")
+            file_name = os.path.basename(file_path)
+            mime_type, _ = mimetypes.guess_type(file_path)
+            print(f"File Name: {file_name}")
+            print(f"File Type (MIME): {mime_type}")
+        finally:
+            audio_file.close()
 
     async def text_to_speech(self, text_chunk, model="tts-1", voice="alloy", buffer_size=1024):
         """Generate speech from text and send the audio data, also save it to a file."""
