@@ -110,7 +110,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                 print("bytes data received")
                 print("bytes_data", bytes_data)
 
-                base64_data = base64.b64encode(bytes_data).decode('utf-8')
+                base64_data = base64.b64encode(bytes_data)
                 with open(INPUT_FILE_PATH, 'wb') as file:
                     file.write(base64_data)
                 transcribed_text = await self.transcribe_audio(INPUT_FILE_PATH)
