@@ -107,7 +107,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         try:
             audio = False
             if bytes_data is not None and text_data is None:
-
+                print("bytes data received")
                 with open(INPUT_FILE_PATH, 'wb') as file:
                     file.write(bytes_data)
                 transcribed_text = await self.transcribe_audio(INPUT_FILE_PATH)
@@ -117,7 +117,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                     "prompt": transcribed_text
                 }
             elif bytes_data is None and text_data is not None:
-
+                print("text data received")
                 text_data_json = json.loads(text_data)
             serializer_data = {
                 'session_id': self.session_id,
