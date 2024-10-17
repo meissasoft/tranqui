@@ -88,11 +88,11 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             f"{time_greeting}, {self.user.username}. What can I do for you today?",
             f"Hello {self.user.username}! {chatbot_name} here. How is everything going?",
             f"Hey {self.user.username}, {chatbot_name} here. Ready to chat?",
-            f"Hi {self.user.username}! How’s everything going today? {chatbot_name} is here to assist.",
-            f"{time_greeting}, {self.user.username}! Hope you are doing great. What’s on your mind?",
-            f"Hello {self.user.username}! Hows your day? {chatbot_name} is here for you.",
+            f"Hi {self.user.username}! How is everything going today? {chatbot_name} is here to assist.",
+            f"{time_greeting}, {self.user.username}! Hope you are doing great. What is on your mind?",
+            f"Hello {self.user.username}! How is your day? {chatbot_name} is here for you.",
             f"Hey {self.user.username}, its {chatbot_name}! How can I assist today?",
-            f"Hi {self.user.username}, hope you’re having a good one! Lets chat if you need anything.",
+            f"Hi {self.user.username}, hope you are having a good one. Lets chat if you need anything.",
             f"{time_greeting}, {self.user.username}. How can I make your day better today?",
         ]
 
@@ -231,9 +231,9 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                     voice=voice,
                     input=text_chunk,
                 )
-
                 for data in response.iter_bytes(buffer_size):
                     await self.send(bytes_data=data)
+                    logger.info('byte_data from openai: ', data)
                     audio_file.write(data)
                     await asyncio.sleep(0)
 
