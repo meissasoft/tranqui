@@ -121,7 +121,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                 text_data_json = json.loads(text_data)
             serializer_data = {
                 'session_id': self.session_id,
-                'prompt': text_data_json.get('prompt'),
+                'prompt': text_data_json, #.get('prompt'),
             }
             serializer = ChatRequestSerializer(data=serializer_data)
             serializer.is_valid(raise_exception=True)
