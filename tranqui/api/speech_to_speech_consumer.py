@@ -108,6 +108,8 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             audio = False
             if bytes_data is not None and text_data is None:
                 print("bytes data received")
+                print("bytes_data", bytes_data)
+
                 base64_data = base64.b64encode(bytes_data).decode('utf-8')
                 with open(INPUT_FILE_PATH, 'wb') as file:
                     file.write(base64_data)
