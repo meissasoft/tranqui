@@ -27,7 +27,6 @@ class JWTAuthenticationMiddleware(BaseMiddleware):
             token = query_params.get('token', [None])[0]
             if token:
                 try:
-                    token = token.decode()
                     payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
                     scope['user'] = await get_user(payload['user_id'])
                 except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, KeyError) as e:
