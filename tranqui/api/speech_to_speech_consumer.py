@@ -1,6 +1,4 @@
-import mimetypes
 from datetime import datetime
-
 import openai
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
@@ -13,7 +11,6 @@ import json
 import logging
 import math
 import string
-import base64
 import random
 import asyncio
 import os
@@ -75,24 +72,24 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         # Define 20 short, user-friendly greetings
         greetings = [
             f"{time_greeting}, {self.user.username}! I am {chatbot_name}. How’s your day going?",
-            f"Hello, {self.user.username}! Its {chatbot_name}. What is on your mind today?",
+            f"Hello, {self.user.username}! It's {chatbot_name}. What is on your mind today?",
             f"Hey {self.user.username}, {chatbot_name} here. How have you been?",
             f"Hi {self.user.username}, {chatbot_name} at your service! How can I assist?",
             f"{time_greeting}, {self.user.username}! Ready for a great conversation?",
-            f"Hello {self.user.username}! {chatbot_name} here. Lets make today productive!",
+            f"Hello {self.user.username}! {chatbot_name} here. Let's make today productive!",
             f"Hey {self.user.username}, hope you are doing well! {chatbot_name} here to help.",
             f"{time_greeting}, {self.user.username}! How is everything going on your end?",
             f"Hi {self.user.username}, {chatbot_name} here. How can I make your day easier?",
             f"Hey {self.user.username}! Let me know if you need help with anything.",
-            f"Hi {self.user.username}, it is {chatbot_name}. How is your day been so far?",
+            f"Hi {self.user.username}, it is {chatbot_name}. How has your day been so far?",
             f"{time_greeting}, {self.user.username}. What can I do for you today?",
             f"Hello {self.user.username}! {chatbot_name} here. How is everything going?",
             f"Hey {self.user.username}, {chatbot_name} here. Ready to chat?",
             f"Hi {self.user.username}! How is everything going today? {chatbot_name} is here to assist.",
             f"{time_greeting}, {self.user.username}! Hope you are doing great. What is on your mind?",
             f"Hello {self.user.username}! How is your day? {chatbot_name} is here for you.",
-            f"Hey {self.user.username}, its {chatbot_name}! How can I assist today?",
-            f"Hi {self.user.username}, hope you are having a good one. Lets chat if you need anything.",
+            f"Hey {self.user.username}, it's {chatbot_name}! How can I assist today?",
+            f"Hi {self.user.username}, hope you are having a good one. Let's chat if you need anything.",
             f"{time_greeting}, {self.user.username}. How can I make your day better today?",
         ]
 
@@ -222,7 +219,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         except (Exception, openai.BadRequestError) as e:
             raise e
 
-    async def text_to_speech(self, text_chunk, model="tts-1", voice="alloy", buffer_size=1024):
+    async def text_to_speech(self, text_chunk, model="tts-1", voice="alloy", buffer_size=51200):
         """Generate speech from text and send the audio data, also save it to a file."""
         try:
             with open(SPEECH_FILE_PATH, "ab") as audio_file:
@@ -233,7 +230,6 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                 )
                 for data in response.iter_bytes(buffer_size):
                     await self.send(bytes_data=data)
-                    logger.info('byte_data from openai: ', data)
                     audio_file.write(data)
                     await asyncio.sleep(0)
 
