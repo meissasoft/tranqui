@@ -21,7 +21,7 @@ OPENAI_TOKEN_LIMIT = settings.OPENAI_TOKEN_LIMIT
 TOKEN_PER_WORD = settings.TOKEN_PER_WORD
 SPEECH_FILE_PATH = "api/speech.mp3"
 INPUT_FILE_PATH = "api/input.mp3"
-BATCH_SIZE = 5
+BATCH_SIZE = 20
 
 
 async def get_user(username):
