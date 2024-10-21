@@ -19,9 +19,10 @@ logger = logging.getLogger(__name__)
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 OPENAI_TOKEN_LIMIT = settings.OPENAI_TOKEN_LIMIT
 TOKEN_PER_WORD = settings.TOKEN_PER_WORD
-SPEECH_FILE_PATH = "api/speech.mp3"
-INPUT_FILE_PATH = "api/input.mp3"
-BATCH_SIZE = 20
+SPEECH_FILE_PATH = settings.SPEECH_FILE_PATH
+INPUT_FILE_PATH = settings.INPUT_FILE_PATH
+BATCH_SIZE = int(settings.BATCH_SIZE)
+BUFFER_SIZE = int(settings.BUFFER_SIZE)
 
 
 async def get_user(username):
@@ -219,7 +220,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         except (Exception, openai.BadRequestError) as e:
             raise e
 
-    async def text_to_speech(self, text_chunk, model="tts-1", voice="alloy", buffer_size=51200):
+    async def text_to_speech(self, text_chunk, model="tts-1", voice="alloy", buffer_size=BUFFER_SIZE):
         """Generate speech from text and send the audio data, also save it to a file."""
         try:
             with open(SPEECH_FILE_PATH, "ab") as audio_file:

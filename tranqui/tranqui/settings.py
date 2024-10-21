@@ -172,3 +172,8 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
 }
 CHATBOT_NAME = os.environ.get('CHATBOT_NAME')
+SPEECH_FILE_PATH = os.environ.get('SPEECH_FILE_PATH')
+INPUT_FILE_PATH = os.environ.get('INPUT_FILE_PATH')
+BUFFER_SIZE = os.environ.get('BUFFER_SIZE')
+BATCH_SIZE = os.environ.get('BATCH_SIZE')
+
