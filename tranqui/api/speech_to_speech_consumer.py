@@ -14,6 +14,7 @@ import string
 import random
 import asyncio
 import os
+import requests
 
 logger = logging.getLogger(__name__)
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -23,6 +24,8 @@ SPEECH_FILE_PATH = settings.SPEECH_FILE_PATH
 INPUT_FILE_PATH = settings.INPUT_FILE_PATH
 BATCH_SIZE = int(settings.BATCH_SIZE)
 BUFFER_SIZE = int(settings.BUFFER_SIZE)
+DEEPGRAM_URL = settings.DEEPGRAM_URL
+DEEPGRAM_API_KEY = settings.DEEPGRAM_API_KEY
 
 
 async def get_user(username):
@@ -111,12 +114,16 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             audio = False
             if bytes_data is not None and text_data is None:
                 logger.info("bytes data received")
+                logger.info(bytes_data)
+                print("bytes data received", flush=True)
+                print(bytes_data)
                 with open(INPUT_FILE_PATH, 'wb') as file:
                     file.write(bytes_data)
-                transcribed_text = await self.transcribe_audio(INPUT_FILE_PATH)
+                # transcribed_text = await self.transcribe_audio(INPUT_FILE_PATH)
+                deepgram_transcribed_text = await self.deepgram_transcribe_audio(INPUT_FILE_PATH)
                 audio = True
                 text_data_json = {
-                    "prompt": transcribed_text
+                    "prompt": deepgram_transcribed_text
                 }
 
             elif bytes_data is None and text_data is not None:
@@ -130,6 +137,8 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             serializer.is_valid(raise_exception=True)
             response_content = await self.process_prompt(serializer.validated_data, user=self.user, audio=audio)
             await self.send(text_data=json.dumps(response_content))
+            print("Response sent to client:", response_content, flush=True)
+
 
         except json.JSONDecodeError:
             logger.error("Invalid JSON received.")
@@ -211,11 +220,15 @@ class SpeechConsumer(AsyncWebsocketConsumer):
     async def transcribe_audio(self, file_path):
         """Transcribe incoming voice note"""
         audio_file = open(file_path, "rb")
+        print("audio_file: ", audio_file)
+        data_content = audio_file.read()
+        print("data_content: ", data_content)
         try:
             transcription = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file
             )
+            print('transcribed text from OPEN AI: ', transcription.text)
             return transcription.text
         except (Exception, openai.BadRequestError) as e:
             raise e
@@ -275,6 +288,22 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             total_tokens=total_tokens
         )
         chat.save()
+
+    async def deepgram_transcribe_audio(self, audio_file_path):
+        with open(audio_file_path, 'rb') as audio:
+            headers = {
+                'Authorization': f"Token {DEEPGRAM_API_KEY}",
+                'Content-Type': 'audio/wav',
+            }
+            response = requests.post(DEEPGRAM_URL, headers=headers, data=audio)
+            if response.status_code == 200:
+                transcribed_text = response.json().get('results', {}).get('channels', [])[0].get('alternatives', [])[
+                    0].get(
+                    'transcript', '')
+                print("transcribed text from DEEP GRAM: ", transcribed_text)
+                return transcribed_text
+            else:
+                raise Exception(f"Error in transcription from DEEP GRAM: {response.text}")
 
 
 def object_to_dict(obj):
