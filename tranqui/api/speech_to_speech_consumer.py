@@ -1,4 +1,7 @@
+import base64
+import uuid
 from datetime import datetime
+import aio_pika
 import openai
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
@@ -26,79 +29,34 @@ BATCH_SIZE = int(settings.BATCH_SIZE)
 BUFFER_SIZE = int(settings.BUFFER_SIZE)
 DEEPGRAM_URL = settings.DEEPGRAM_URL
 DEEPGRAM_API_KEY = settings.DEEPGRAM_API_KEY
-
-
-async def get_user(username):
-    """Get a User instance by username asynchronously."""
-    return await database_sync_to_async(User.objects.get)(username=username)
-
-
-def generate_random_session_id(length=10):
-    """Generate a random session ID of the specified length."""
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+RABBITMQ_URL = settings.RABBITMQ_URL
 
 
 class SpeechConsumer(AsyncWebsocketConsumer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.exchange = None
+        self.response_queue = None
+        self.transcribed_text_queue = None
+        self.audio_queue = None
+        self.connection = None
         self.user = None
         self.session_id = None
+        self.request_id = None
+        self.active_tasks = {}
 
     async def connect(self):
         """Handle WebSocket connection."""
         self.session_id = self.scope['url_route']['kwargs'].get('session_id')
         self.user = self.scope.get('user')
-
         if self.user is not None and self.user.is_authenticated:
             await self.accept()
-            logger.info(f"User {self.user.username} connected via WebSocket.")
-            await self.send(text_data=json.dumps({"message": "WebSocket connection established"}))
-            greeting_message = self.get_greeting()
-            await self.send(text_data=json.dumps({"message": greeting_message}))
+            await self.setup_rabbitmq_queues()
+            asyncio.create_task(self.forward_messages_to_ws())
+            # await self.publish_response_to_ws(message_text=(self.get_greeting()))
+            await self.send(text_data=json.dumps({"message": self.get_greeting()}))
         else:
             await self.close()
-
-    def get_greeting(self):
-        """Returns a short greeting based on the time of day and user's name."""
-        current_hour = datetime.now().hour
-        chatbot_name = settings.CHATBOT_NAME  # Fetch chatbot name from .env
-
-        # Determine greeting based on the time of day
-        if 5 <= current_hour < 12:
-            time_greeting = "Good morning"
-        elif 12 <= current_hour < 17:
-            time_greeting = "Good afternoon"
-        elif 17 <= current_hour < 20:
-            time_greeting = "Good evening"
-        else:
-            time_greeting = "Good night"
-
-        # Define 20 short, user-friendly greetings
-        greetings = [
-            f"{time_greeting}, {self.user.username}! I am {chatbot_name}. How’s your day going?",
-            f"Hello, {self.user.username}! It's {chatbot_name}. What is on your mind today?",
-            f"Hey {self.user.username}, {chatbot_name} here. How have you been?",
-            f"Hi {self.user.username}, {chatbot_name} at your service! How can I assist?",
-            f"{time_greeting}, {self.user.username}! Ready for a great conversation?",
-            f"Hello {self.user.username}! {chatbot_name} here. Let's make today productive!",
-            f"Hey {self.user.username}, hope you are doing well! {chatbot_name} here to help.",
-            f"{time_greeting}, {self.user.username}! How is everything going on your end?",
-            f"Hi {self.user.username}, {chatbot_name} here. How can I make your day easier?",
-            f"Hey {self.user.username}! Let me know if you need help with anything.",
-            f"Hi {self.user.username}, it is {chatbot_name}. How has your day been so far?",
-            f"{time_greeting}, {self.user.username}. What can I do for you today?",
-            f"Hello {self.user.username}! {chatbot_name} here. How is everything going?",
-            f"Hey {self.user.username}, {chatbot_name} here. Ready to chat?",
-            f"Hi {self.user.username}! How is everything going today? {chatbot_name} is here to assist.",
-            f"{time_greeting}, {self.user.username}! Hope you are doing great. What is on your mind?",
-            f"Hello {self.user.username}! How is your day? {chatbot_name} is here for you.",
-            f"Hey {self.user.username}, it's {chatbot_name}! How can I assist today?",
-            f"Hi {self.user.username}, hope you are having a good one. Let's chat if you need anything.",
-            f"{time_greeting}, {self.user.username}. How can I make your day better today?",
-        ]
-
-        # Randomly choose one greeting
-        return random.choice(greetings)
 
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection."""
@@ -106,52 +64,61 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         if os.path.exists(SPEECH_FILE_PATH):
             os.remove(SPEECH_FILE_PATH)
         await self.close()
-        pass
 
     async def receive(self, text_data=None, bytes_data=None):
         """Handle incoming WebSocket messages asynchronously."""
         try:
             audio = False
+            self.request_id = self.generate_request_id()
             if bytes_data is not None and text_data is None:
-                logger.info("bytes data received")
-                logger.info(bytes_data)
-                print("bytes data received", flush=True)
-                print(bytes_data)
-                with open(INPUT_FILE_PATH, 'wb') as file:
-                    file.write(bytes_data)
-                # transcribed_text = await self.transcribe_audio(INPUT_FILE_PATH)
-                deepgram_transcribed_text = await self.deepgram_transcribe_audio(INPUT_FILE_PATH)
                 audio = True
-                text_data_json = {
-                    "prompt": deepgram_transcribed_text
-                }
+                if self.user in self.active_tasks:
+                    task = self.active_tasks.pop(self.user)
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        print(f"Task for user {self.user} was canceled.")
+                    except Exception as e:
+                        print(f"Error during task cancellation: {e}")
+                # print("bytes data received", bytes_data, flush=True)
+                encoded_data = base64.b64encode(bytes_data).decode('utf-8')
+
+                message_body = self.create_message_body(data=encoded_data)
+                await self.exchange.publish(
+                    aio_pika.Message(body=json.dumps(message_body).encode('utf-8')),
+                    routing_key='audio_queue_routing_key'  # Ensure this matches the queue binding
+                )
+                # transcribed_text = await self.transcribe_audio(INPUT_FILE_PATH)
+
+                asyncio.create_task(self.deepgram_transcribe_audio(INPUT_FILE_PATH))
+                # asyncio.create_task(self.consume_text_queue(audio=audio))
 
             elif bytes_data is None and text_data is not None:
-                logger.info("text data received")
-                text_data_json = json.loads(text_data)
-            serializer_data = {
-                'session_id': self.session_id,
-                'prompt': text_data_json.get('prompt'),
-            }
-            serializer = ChatRequestSerializer(data=serializer_data)
-            serializer.is_valid(raise_exception=True)
-            response_content = await self.process_prompt(serializer.validated_data, user=self.user, audio=audio)
-            await self.send(text_data=json.dumps(response_content))
-            print("Response sent to client:", response_content, flush=True)
-
+                print("text data received", text_data, flush=True)
+                serializer_data = {
+                    'session_id': self.session_id,
+                    'prompt': json.loads(text_data).get('prompt')
+                }
+                message_body = self.create_message_body(data=serializer_data)
+                await self.exchange.publish(
+                    aio_pika.Message(body=json.dumps(message_body).encode('utf-8')),
+                    routing_key='text_queue_routing_key'
+                )
+            asyncio.create_task(self.consume_text_queue(audio=audio))
+            await self.cleanup_tasks()
 
         except json.JSONDecodeError:
             logger.error("Invalid JSON received.")
             await self.send(text_data=json.dumps({'error': 'Invalid JSON format'}))
         except Exception as e:
             logger.exception("Error in WebSocket receive method.")
-            await self.send(text_data=json.dumps({'error': 'An unexpected error occurred.'}))
+            await self.send(text_data=json.dumps({'error': f'An unexpected error occurred ({e})'}))
 
     async def process_prompt(self, validated_data, user, audio):
         """Process the user prompt and send it to OpenAI API."""
         try:
             prompt = validated_data['prompt']
-
             session_id = self.session_id
             if session_id:
                 chats = await self.get_chats_by_session_id(user, session_id)
@@ -192,7 +159,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                     assistant_response = complete_response
                 else:
                     response = client.chat.completions.create(
-                        model="gpt-4o",
+                        model="gpt-3.5-turbo",
                         messages=messages
                     )
                     response_dict = object_to_dict(response)
@@ -209,7 +176,13 @@ class SpeechConsumer(AsyncWebsocketConsumer):
 
             total_tokens = calculate_token_count(assistant_response)
             await self.save_chat_response(user, prompt, assistant_response, session_id, total_tokens)
-            return assistant_response
+            message_body = self.create_message_body(data=assistant_response)
+            await self.exchange.publish(
+                aio_pika.Message(body=json.dumps(message_body).encode('utf-8')),
+                routing_key='response_queue_routing_key'
+            )
+            print("self.active_tasks", self.active_tasks)
+
         except KeyError as e:
             logger.error(f"Key error in process_prompt: {str(e)}")
             return "Sorry, there was an issue processing your request."
@@ -290,20 +263,155 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         chat.save()
 
     async def deepgram_transcribe_audio(self, audio_file_path):
-        with open(audio_file_path, 'rb') as audio:
-            headers = {
-                'Authorization': f"Token {DEEPGRAM_API_KEY}",
-                'Content-Type': 'audio/wav',
-            }
-            response = requests.post(DEEPGRAM_URL, headers=headers, data=audio)
-            if response.status_code == 200:
-                transcribed_text = response.json().get('results', {}).get('channels', [])[0].get('alternatives', [])[
-                    0].get(
-                    'transcript', '')
-                print("transcribed text from DEEP GRAM: ", transcribed_text)
-                return transcribed_text
-            else:
-                raise Exception(f"Error in transcription from DEEP GRAM: {response.text}")
+        async with self.audio_queue.iterator() as queue_iter:
+            async for message in queue_iter:
+                async with message.process():
+                    decoded_body = message.body.decode('utf-8')
+                    message_data = json.loads(decoded_body)
+                    data = message_data['data']
+                    with open(INPUT_FILE_PATH, 'wb') as file:
+                        file.write(base64.b64decode(data))
+                    with open(audio_file_path, 'rb') as audio:
+                        headers = {
+                            'Authorization': f"Token {DEEPGRAM_API_KEY}",
+                            'Content-Type': 'audio/wav',
+                        }
+                        response = requests.post(DEEPGRAM_URL, headers=headers, data=audio)
+                        if response.status_code == 200:
+                            transcribed_text = \
+                                response.json().get('results', {}).get('channels', [])[0].get('alternatives', [])[
+                                    0].get(
+                                    'transcript', '')
+                            print("transcribed text from DEEP GRAM: ", transcribed_text)
+                            message_body = self.create_message_body(data=transcribed_text)
+                            await self.exchange.publish(
+                                aio_pika.Message(body=json.dumps(message_body).encode('utf-8')),
+                                routing_key='text_queue_routing_key'
+                            )
+                        else:
+                            raise Exception(f"Error in transcription from DEEP GRAM: {response.text}")
+                # await message.ack()
+
+    def get_greeting(self):
+        """Returns a short greeting based on the time of day and user's name."""
+        current_hour = datetime.now().hour
+        chatbot_name = settings.CHATBOT_NAME  # Fetch chatbot name from .env
+
+        # Determine greeting based on the time of day
+        if 5 <= current_hour < 12:
+            time_greeting = "Good morning"
+        elif 12 <= current_hour < 17:
+            time_greeting = "Good afternoon"
+        elif 17 <= current_hour < 20:
+            time_greeting = "Good evening"
+        else:
+            time_greeting = "Good night"
+
+        # Define 20 short, user-friendly greetings
+        greetings = [
+            f"{time_greeting}, {self.user.username}! I am {chatbot_name}. How’s your day going?",
+            f"Hello, {self.user.username}! It's {chatbot_name}. What is on your mind today?",
+            f"Hey {self.user.username}, {chatbot_name} here. How have you been?",
+            f"Hi {self.user.username}, {chatbot_name} at your service! How can I assist?",
+            f"{time_greeting}, {self.user.username}! Ready for a great conversation?",
+            f"Hello {self.user.username}! {chatbot_name} here. Let's make today productive!",
+            f"Hey {self.user.username}, hope you are doing well! {chatbot_name} here to help.",
+            f"{time_greeting}, {self.user.username}! How is everything going on your end?",
+            f"Hi {self.user.username}, {chatbot_name} here. How can I make your day easier?",
+            f"Hey {self.user.username}! Let me know if you need help with anything.",
+            f"Hi {self.user.username}, it is {chatbot_name}. How has your day been so far?",
+            f"{time_greeting}, {self.user.username}. What can I do for you today?",
+            f"Hello {self.user.username}! {chatbot_name} here. How is everything going?",
+            f"Hey {self.user.username}, {chatbot_name} here. Ready to chat?",
+            f"Hi {self.user.username}! How is everything going today? {chatbot_name} is here to assist.",
+            f"{time_greeting}, {self.user.username}! Hope you are doing great. What is on your mind?",
+            f"Hello {self.user.username}! How is your day? {chatbot_name} is here for you.",
+            f"Hey {self.user.username}, it's {chatbot_name}! How can I assist today?",
+            f"Hi {self.user.username}, hope you are having a good one. Let's chat if you need anything.",
+            f"{time_greeting}, {self.user.username}. How can I make your day better today?",
+        ]
+
+        # Randomly choose one greeting
+        return random.choice(greetings)
+
+    async def publish_response_to_ws(self, message_text):
+        message_body = self.create_message_body(data=message_text)
+        await self.exchange.publish(
+            aio_pika.Message(body=json.dumps(message_body).encode('utf-8')),
+            routing_key='response_queue_routing_key'
+        )
+
+    async def consume_text_queue(self, audio: bool):
+        while True:
+            try:
+                async with self.transcribed_text_queue.iterator() as queue_iter:
+                    async for message in queue_iter:
+                        async with message.process():
+                            decoded_body = message.body.decode('utf-8')
+                            message_data = json.loads(decoded_body)
+                            transcribed_text = message_data['data']
+                            print("transcribed text:   ", transcribed_text)
+                            json_data = {
+                                "prompt": transcribed_text
+                            }
+                            serializer_data = {
+                                'session_id': self.session_id,
+                                'prompt': json_data.get('prompt'),
+                            }
+                            serializer = ChatRequestSerializer(data=serializer_data)
+                            serializer.is_valid(raise_exception=True)
+                            self.active_tasks[self.user] = asyncio.create_task(self.process_prompt(serializer.validated_data, user=self.user,audio=audio))
+
+            except aio_pika.exceptions.ChannelClosed as e:
+                logger.error("Channel closed: %s", e)
+                break  # Exit the loop if the channel is closed
+            except json.JSONDecodeError as e:
+                logger.error("Failed to decode JSON: %s", e)
+                await message.reject(requeue=False)  # Reject the message without requeuing
+            except Exception as e:
+                logger.error("Error processing message: %s", e)
+                await message.reject(requeue=True)  # Reject and requeue on error
+
+    async def forward_messages_to_ws(self):
+        async with self.response_queue.iterator() as queue_iter:
+            async for message in queue_iter:
+                async with message.process():
+                    decoded_body = message.body.decode('utf-8')
+                    message_data = json.loads(decoded_body)
+                    data = message_data['data']
+                    print("data:", data)
+                    await self.send(data)
+                # await message.ack()
+
+    async def setup_rabbitmq_queues(self):
+        self.connection = await aio_pika.connect_robust(RABBITMQ_URL)
+        channel = await self.connection.channel()
+        self.exchange = await channel.declare_exchange('tranqui_exchange', aio_pika.ExchangeType.DIRECT)
+        self.audio_queue = await channel.declare_queue('audio_queue')
+        self.transcribed_text_queue = await channel.declare_queue('text_queue')
+        self.response_queue = await channel.declare_queue('response_queue')
+        await self.audio_queue.bind(self.exchange, routing_key='audio_queue_routing_key')
+        await self.transcribed_text_queue.bind(self.exchange, routing_key='text_queue_routing_key')
+        await self.response_queue.bind(self.exchange, routing_key='response_queue_routing_key')
+
+    def create_message_body(self, data):
+        return {
+            'session_id': self.session_id,
+            'request_id': self.request_id,
+            'timestamp': datetime.now().isoformat(),  # Current timestamp in seconds
+            'data': data
+        }
+
+    def generate_request_id(self):
+        """Generate a unique request ID using UUID."""
+        return str(uuid.uuid4())
+
+    async def cleanup_tasks(self):
+        """Remove completed tasks from active tasks."""
+        for request_id, task in list(self.active_tasks.items()):
+            if task.done():
+                # Optionally, you can handle exceptions here
+                self.active_tasks.pop(request_id)
 
 
 def object_to_dict(obj):
@@ -321,3 +429,13 @@ def object_to_dict(obj):
 def calculate_token_count(messages: str) -> int:
     # 750 tokens per 1000 words which equals to 0.75 token per word
     return math.ceil(len(messages.split()) * float(TOKEN_PER_WORD))
+
+
+async def get_user(username):
+    """Get a User instance by username asynchronously."""
+    return await database_sync_to_async(User.objects.get)(username=username)
+
+
+def generate_random_session_id(length=10):
+    """Generate a random session ID of the specified length."""
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
