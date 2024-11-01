@@ -50,6 +50,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         self.session_id = self.scope['url_route']['kwargs'].get('session_id')
         self.user = self.scope.get('user')
         if self.user is not None and self.user.is_authenticated:
+            print(self.user)
             await self.accept()
             await self.setup_rabbitmq_queues()
             asyncio.create_task(self.forward_messages_to_ws())
@@ -71,9 +72,11 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             audio = False
             self.request_id = self.generate_request_id()
             if bytes_data is not None and text_data is None:
+                print(f"{datetime.now()} | Received bytes")
                 audio = True
-                if self.user in self.active_tasks:
-                    task = self.active_tasks.pop(self.user)
+                if self.active_tasks.get(self.user.email):
+                    print(f"{datetime.now()} |  received from {self.user.email} i.e {self.active_tasks.get(self.user.email)}")
+                    task = self.active_tasks.pop(self.user.email)
                     task.cancel()
                     try:
                         await task
@@ -81,10 +84,11 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                         print(f"Task for user {self.user} was canceled.")
                     except Exception as e:
                         print(f"Error during task cancellation: {e}")
+                self.active_tasks[self.user.email] = self.user.username
                 # print("bytes data received", bytes_data, flush=True)
                 encoded_data = base64.b64encode(bytes_data).decode('utf-8')
 
-                message_body = self.create_message_body(data=encoded_data)
+                message_body = self.create_message_body(data=encoded_data, data_type='bytes')
                 await self.exchange.publish(
                     aio_pika.Message(body=json.dumps(message_body).encode('utf-8')),
                     routing_key='audio_queue_routing_key'  # Ensure this matches the queue binding
@@ -100,7 +104,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                     'session_id': self.session_id,
                     'prompt': json.loads(text_data).get('prompt')
                 }
-                message_body = self.create_message_body(data=serializer_data)
+                message_body = self.create_message_body(data=serializer_data, data_type='str')
                 await self.exchange.publish(
                     aio_pika.Message(body=json.dumps(message_body).encode('utf-8')),
                     routing_key='text_queue_routing_key'
@@ -176,12 +180,12 @@ class SpeechConsumer(AsyncWebsocketConsumer):
 
             total_tokens = calculate_token_count(assistant_response)
             await self.save_chat_response(user, prompt, assistant_response, session_id, total_tokens)
-            message_body = self.create_message_body(data=assistant_response)
+            message_body = self.create_message_body(data=assistant_response, data_type='bytes')
             await self.exchange.publish(
                 aio_pika.Message(body=json.dumps(message_body).encode('utf-8')),
                 routing_key='response_queue_routing_key'
             )
-            print("self.active_tasks", self.active_tasks)
+            print(f"{datetime.now()} | self.active_tasks", self.active_tasks)
 
         except KeyError as e:
             logger.error(f"Key error in process_prompt: {str(e)}")
@@ -282,8 +286,9 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                                 response.json().get('results', {}).get('channels', [])[0].get('alternatives', [])[
                                     0].get(
                                     'transcript', '')
-                            print("transcribed text from DEEP GRAM: ", transcribed_text)
-                            message_body = self.create_message_body(data=transcribed_text)
+                            print(f"{datetime.now()} | transcribed text from DEEP GRAM: ", transcribed_text)
+                            print(f"{datetime.now()} | {self.active_tasks.get(self.user.email)}")
+                            message_body = self.create_message_body(data=transcribed_text, data_type='str')
                             await self.exchange.publish(
                                 aio_pika.Message(body=json.dumps(message_body).encode('utf-8')),
                                 routing_key='text_queue_routing_key'
@@ -335,7 +340,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         return random.choice(greetings)
 
     async def publish_response_to_ws(self, message_text):
-        message_body = self.create_message_body(data=message_text)
+        message_body = self.create_message_body(data=message_text, data_type='str')
         await self.exchange.publish(
             aio_pika.Message(body=json.dumps(message_body).encode('utf-8')),
             routing_key='response_queue_routing_key'
@@ -350,7 +355,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                             decoded_body = message.body.decode('utf-8')
                             message_data = json.loads(decoded_body)
                             transcribed_text = message_data['data']
-                            print("transcribed text:   ", transcribed_text)
+                            print(f"{datetime.now()} | transcribed text:   ", transcribed_text)
                             json_data = {
                                 "prompt": transcribed_text
                             }
@@ -360,7 +365,7 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                             }
                             serializer = ChatRequestSerializer(data=serializer_data)
                             serializer.is_valid(raise_exception=True)
-                            self.active_tasks[self.user] = asyncio.create_task(self.process_prompt(serializer.validated_data, user=self.user,audio=audio))
+                            self.active_tasks[self.user.email] = asyncio.create_task(self.process_prompt(serializer.validated_data, user=self.user,audio=audio))
 
             except aio_pika.exceptions.ChannelClosed as e:
                 logger.error("Channel closed: %s", e)
@@ -378,9 +383,19 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                 async with message.process():
                     decoded_body = message.body.decode('utf-8')
                     message_data = json.loads(decoded_body)
+                    data_type = message_data['data']
                     data = message_data['data']
-                    print("data:", data)
-                    await self.send(data)
+                    if data_type == 'bytes':
+                        data = base64.b64decode(data)
+                    try:
+                        # Send data
+                        await self.send(data)
+                        print(f"{datetime.now()} | Sent data: {data}")
+                        # Wait for acknowledgment from the server
+                    except Exception as e:
+                        print(f"Error sending data: {e}")
+
+
                 # await message.ack()
 
     async def setup_rabbitmq_queues(self):
@@ -394,12 +409,13 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         await self.transcribed_text_queue.bind(self.exchange, routing_key='text_queue_routing_key')
         await self.response_queue.bind(self.exchange, routing_key='response_queue_routing_key')
 
-    def create_message_body(self, data):
+    def create_message_body(self, data, data_type=None):
         return {
             'session_id': self.session_id,
             'request_id': self.request_id,
             'timestamp': datetime.now().isoformat(),  # Current timestamp in seconds
-            'data': data
+            'data': data,
+            'data_type': data_type
         }
 
     def generate_request_id(self):
@@ -409,9 +425,10 @@ class SpeechConsumer(AsyncWebsocketConsumer):
     async def cleanup_tasks(self):
         """Remove completed tasks from active tasks."""
         for request_id, task in list(self.active_tasks.items()):
-            if task.done():
-                # Optionally, you can handle exceptions here
-                self.active_tasks.pop(request_id)
+            if type(task) == asyncio.Task:
+                if task.done():
+                    # Optionally, you can handle exceptions here
+                    self.active_tasks.pop(self.user.email)
 
 
 def object_to_dict(obj):
