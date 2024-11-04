@@ -30,7 +30,7 @@ SECRET_KEY = 'django-insecure-gud17viih(xlfdu^yi#0z7n4u8ab0h2l^z3$rc44b_s#pn7i4)
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['54.162.162.199', 'https://ec2-54-162-162-199.compute-1.amazonaws.com/', '127.0.0.1', '52.90.216.66', '03ea-221-120-236-55.ngrok-free.app']
+ALLOWED_HOSTS = ['54.162.162.199', 'https://ec2-54-162-162-199.compute-1.amazonaws.com/', '127.0.0.1', '52.90.216.66', '03ea-221-120-236-55.ngrok-free.app', *, 'ip-172-31-45-30.ec2.internal']
 
 # Application definition
 
