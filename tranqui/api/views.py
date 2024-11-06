@@ -1,9 +1,15 @@
+import datetime
 import logging
+from livekit import api
+import jwt
+from django.conf import settings
 from django.contrib.auth import authenticate
 from rest_framework import generics
 from rest_framework.exceptions import NotFound
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.utils import timezone
+from rest_framework.views import APIView
+
 from .utils import get_jwt_token, send_verification_email
 from .serializers import *
 from rest_framework import status
@@ -376,3 +382,24 @@ class GetChatsBySessionIDView(generics.ListAPIView):
             logger.error(f"Error retrieving chats for session ID: {session_id}. Exception: {str(e)}")
             return Response({"error": "An error occurred while retrieving chats."},
                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class GetLiveKitToken(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        # Get the API key and secret from settings (or environment variables)
+        api_key = settings.LIVEKIT_API_KEY
+        api_secret = settings.LIVEKIT_API_SECRET
+
+        # Create the LiveKit access token
+        token = api.AccessToken(api_key, api_secret) \
+            .with_identity(request.user.username) \
+            .with_name("My Name") \
+            .with_grants(api.VideoGrants(
+                room_join=True,
+                room="my-room",  # Customize your room name here
+            ))
+
+        # Return the token as a response
+        return Response({"token": token.to_jwt()})

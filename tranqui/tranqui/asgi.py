@@ -4,7 +4,7 @@ from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
 # from api.consumers import ChatbotConsumer
 from api.speech_to_speech_consumer import SpeechConsumer
-
+# from api.livekit_consumer import LiveKitConsumer
 from django.urls import re_path
 from api.jwt_middleware import JWTAuthenticationMiddleware
 

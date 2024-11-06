@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from livekit.agents import cli, WorkerOptions, Plugin
 from livekit.agents.voice_assistant import VoiceAssistant
-from livekit.plugins import openai, silero
+from livekit.plugins import openai, silero, deepgram
 from livekit.agents import llm, AutoSubscribe, JobContext
 import asyncio
 
@@ -33,7 +33,7 @@ class Command(BaseCommand):
 
         self.assistant = VoiceAssistant(
             vad=silero.VAD.load(),
-            stt=openai.STT(),
+            stt=deepgram.STT(),
             llm=openai.LLM(),
             tts=openai.TTS(),
             chat_ctx=initial_context,
