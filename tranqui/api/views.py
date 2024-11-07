@@ -443,4 +443,4 @@ class GetLiveKitToken(APIView):
 
 def generate_random_code() -> str:
     random_code = ''.join(random.choices(string.ascii_letters + string.digits, k=4))
-    return f"--{random_code}"
+    return f"-{random_code}"
