@@ -25,6 +25,7 @@ async def entrypoint(ctx: JobContext):
         ),
     )
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+
     my_llm = openai.LLM(
         model="gpt-3.5-turbo",
         temperature=0.5,
@@ -55,21 +56,21 @@ async def entrypoint(ctx: JobContext):
             identity_list = ctx.room.remote_participants.keys()
             user_identity = list(identity_list)[0]
             print("user: ", user_identity)
-            data = {
-                "user_key": user_identity,
-                "prompt": current_prompt,
-                "response": msg.content,
-            }
-
-            try:
-                response = requests.post(CHAT_API_URL, json=data)
-                if response.status_code == 201:
-                    print("Chat successfully saved to Django server.")
-                else:
-                    print("Failed to save chat:", response.json())
-            except requests.exceptions.RequestException as e:
-                print("Error connecting to Django server:", e)
-            print("Conversation updated:", current_prompt, "->", msg.content)
+            # data = {
+            #     "user_key": user_identity,
+            #     "prompt": current_prompt,
+            #     "response": msg.content,
+            # }
+            #
+            # try:
+            #     response = requests.post(CHAT_API_URL, json=data)
+            #     if response.status_code == 201:
+            #         print("Chat successfully saved to Django server.")
+            #     else:
+            #         print("Failed to save chat:", response.json())
+            # except requests.exceptions.RequestException as e:
+            #     print("Error connecting to Django server:", e)
+            # print("Conversation updated:", current_prompt, "->", msg.content)
 
 
 if __name__ == "__main__":
