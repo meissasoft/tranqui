@@ -2,7 +2,7 @@ import datetime
 import logging
 import string
 
-from livekit import api
+from livekit import api, rtc
 import jwt
 from django.conf import settings
 from django.contrib.auth import authenticate
@@ -386,26 +386,57 @@ class GetChatsBySessionIDView(generics.ListAPIView):
                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class CreateChatView(generics.CreateAPIView):
+    """
+    Creates a new Chat instance for a given user.
+    """
+    serializer_class = ChatSerializer
+
+    def post(self, request, *args, **kwargs):
+        user_key = request.data.get('user_key')
+        prompt = request.data.get('prompt')
+        response = request.data.get('response')
+
+        # Extract session_id and username
+        session_id = user_key[-5:]
+        username = user_key[:-5]
+        # Find the user
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Create Chat instance
+        chat = Chat(user=user, prompt=prompt, response=response, session_id=session_id, total_tokens=0)
+        chat.save()
+
+        return Response({"message": "Chat created successfully"}, status=status.HTTP_201_CREATED)
+
+
 class GetLiveKitToken(APIView):
     permission_classes = [IsAuthenticated]
+    room = rtc.Room()
+    token = None
 
     def get(self, request, *args, **kwargs):
         # Get the API key and secret from settings (or environment variables)
         api_key = settings.LIVEKIT_API_KEY
         api_secret = settings.LIVEKIT_API_SECRET
         identity = request.user.username + generate_random_code()
-        print("request.user.username", identity)
-        print("room", settings.LIVEKIT_ROOM_NAME + generate_random_code())
+        session_id = generate_random_code()
+
+        print("room", settings.LIVEKIT_ROOM_NAME + session_id)
         random_code = ''.join(random.choices(string.ascii_letters + string.digits, k=4))
-        # Create the LiveKit access token
         token = api.AccessToken(api_key, api_secret) \
             .with_identity(request.user.username) \
             .with_name("Tranqui AI Assistant") \
-            .with_grants(api.VideoGrants(
+            .with_grants(
+            api.VideoGrants(
                 room_join=True,
                 room=settings.LIVEKIT_ROOM_NAME + generate_random_code(),  # Customize your room name here
-            ))
-
+            )
+        )
+        self.token = token.to_jwt()
         # Return the token as a response
         return Response({"Livekit access token": token.to_jwt()})
 

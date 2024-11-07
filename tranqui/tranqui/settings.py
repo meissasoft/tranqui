@@ -183,4 +183,5 @@ LIVEKIT_ROOM_NAME = os.environ.get('LIVEKIT_ROOM_NAME')
 LIVEKIT_API_SECRET = os.environ.get('LIVEKIT_API_SECRET')
 LIVEKIT_API_KEY = os.environ.get('LIVEKIT_API_KEY')
 LIVEKIT_API_URL = os.environ.get('LIVEKIT_URL')
+CHAT_API_URL = os.environ.get('CHAT_API_URL')
 

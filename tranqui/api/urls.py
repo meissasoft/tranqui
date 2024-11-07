@@ -11,6 +11,7 @@ urlpatterns = [
     path('auth/reset-password/', ResetPasswordView.as_view(), name='reset_password'),
     path('auth/google-sign-in/', GoogleSignInView.as_view(), name='google-sign-in'),
     path('chats/', GetAllChatsView.as_view(), name='get_all_chats'),
+    path('chats/create-chat/', CreateChatView.as_view(), name='create-chat'),
     path('chats/session/<str:session_id>/', GetChatsBySessionIDView.as_view(), name='get_chats_by_session_id'),
     path('get-livekit-token/', GetLiveKitToken.as_view(), name='get_livekit_token'),
 
