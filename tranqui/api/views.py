@@ -1,5 +1,7 @@
 import datetime
 import logging
+import string
+
 from livekit import api
 import jwt
 from django.conf import settings
@@ -391,15 +393,23 @@ class GetLiveKitToken(APIView):
         # Get the API key and secret from settings (or environment variables)
         api_key = settings.LIVEKIT_API_KEY
         api_secret = settings.LIVEKIT_API_SECRET
-
+        identity = request.user.username + generate_random_code()
+        print("request.user.username", identity)
+        print("room", settings.LIVEKIT_ROOM_NAME + generate_random_code())
+        random_code = ''.join(random.choices(string.ascii_letters + string.digits, k=4))
         # Create the LiveKit access token
         token = api.AccessToken(api_key, api_secret) \
             .with_identity(request.user.username) \
-            .with_name("My Name") \
+            .with_name("Tranqui AI Assistant") \
             .with_grants(api.VideoGrants(
                 room_join=True,
-                room="my-room",  # Customize your room name here
+                room=settings.LIVEKIT_ROOM_NAME + generate_random_code(),  # Customize your room name here
             ))
 
         # Return the token as a response
-        return Response({"token": token.to_jwt()})
+        return Response({"Livekit access token": token.to_jwt()})
+
+
+def generate_random_code() -> str:
+    random_code = ''.join(random.choices(string.ascii_letters + string.digits, k=4))
+    return f"--{random_code}"

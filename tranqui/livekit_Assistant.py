@@ -28,8 +28,7 @@ async def entrypoint(ctx: JobContext):
     assitant.start(ctx.room)
 
     await asyncio.sleep(1)
-    await assitant.say("Hey, how can I help you today!", allow_interruptions=True)
-    await assitant.
+    await assitant.say("Hello, I am Tranqui AI assistant, how can I help you today!", allow_interruptions=True)
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
