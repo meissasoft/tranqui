@@ -396,7 +396,7 @@ class CreateChatView(generics.CreateAPIView):
         user_key = request.data.get('user_key')
         prompt = request.data.get('prompt')
         response = request.data.get('response')
-
+        print("user_key ", user_key)
         # Extract session_id and username
         session_id = user_key[-5:]
         username = user_key[:-5]
@@ -428,7 +428,7 @@ class GetLiveKitToken(APIView):
         print("room", settings.LIVEKIT_ROOM_NAME + session_id)
         random_code = ''.join(random.choices(string.ascii_letters + string.digits, k=4))
         token = api.AccessToken(api_key, api_secret) \
-            .with_identity(request.user.username) \
+            .with_identity(identity) \
             .with_name("Tranqui AI Assistant") \
             .with_grants(
             api.VideoGrants(
