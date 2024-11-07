@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 from livekit import rtc
 from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm
 from livekit.agents.voice_assistant import VoiceAssistant
-from livekit.plugins import openai, silero
+from livekit.plugins import openai, silero, deepgram
+from livekit.rtc import participant
 
 load_dotenv()
 
@@ -29,10 +30,18 @@ async def entrypoint(ctx: JobContext):
     my_llm = openai.LLM(
         model="gpt-3.5-turbo",
         temperature=0.5,
+
     )
+    dg_model = "nova-2-general"
+
+    if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+        dg_model = "nova-2-phonecall"
     assistant = VoiceAssistant(
         vad=silero.VAD.load(),
-        stt=openai.STT(),
+        stt=deepgram.STT(
+            model=dg_model,
+            language="en-US",
+        ),
         llm=my_llm,
         tts=openai.TTS(),
         chat_ctx=initial_ctx,
