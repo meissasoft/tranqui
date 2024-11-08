@@ -2,6 +2,9 @@ import datetime
 import logging
 import string
 
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
+from jwt import ExpiredSignatureError, InvalidTokenError
 from livekit import api, rtc
 import jwt
 from django.conf import settings
@@ -391,53 +394,80 @@ class CreateChatView(generics.CreateAPIView):
     Creates a new Chat instance for a given user.
     """
     serializer_class = ChatSerializer
+    permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
-        user_key = request.data.get('user_key')
-        prompt = request.data.get('prompt')
-        response = request.data.get('response')
-        print("user_key ", user_key)
-        # Extract session_id and username
-        session_id = user_key[-5:]
-        username = user_key[:-5]
-        # Find the user
-        try:
-            user = User.objects.get(username=username)
-        except User.DoesNotExist:
-            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        # Create Chat instance
-        chat = Chat(user=user, prompt=prompt, response=response, session_id=session_id, total_tokens=0)
-        chat.save()
-
-        return Response({"message": "Chat created successfully"}, status=status.HTTP_201_CREATED)
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            # Extract the token by removing the "Bearer " prefix
+            token = auth_header.split(" ")[1]
+            prompt = request.data.get('prompt')
+            response = request.data.get('response')
+            try:
+                print("Token:", token)
+                # Decode the token using Django's secret key and HS256 algorithm
+                data = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+                print("Decoded data:", data)
+                if data:
+                    try:
+                        user_id = data.get("user_id")
+                        user = User.objects.get(id=user_id)
+                        # Create Chat instance
+                        chat = Chat(user=user, prompt=prompt, response=response)
+                        chat.save()
+                    except User.DoesNotExist:
+                        return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+                    except InvalidTokenError:
+                        return Response({"error": "Invalid token"}, status=401)
+                    return Response({"message": "Chat created successfully"}, status=status.HTTP_201_CREATED)
+            except ExpiredSignatureError:
+                return Response({"error": "Token has expired"}, status=401)
+        else:
+            return Response({"error": "Invalid token header"}, status=401)
 
 
 class GetLiveKitToken(APIView):
     permission_classes = [IsAuthenticated]
     room = rtc.Room()
-    token = None
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                name='Room', in_=openapi.IN_QUERY, description="Room name", type=openapi.TYPE_STRING, required=False
+            ),
+            openapi.Parameter(
+                name='Identity', in_=openapi.IN_QUERY, description="User identity", type=openapi.TYPE_STRING,
+                required=False
+            )
+        ]
+    )
     def get(self, request, *args, **kwargs):
         # Get the API key and secret from settings (or environment variables)
         api_key = settings.LIVEKIT_API_KEY
         api_secret = settings.LIVEKIT_API_SECRET
-        identity = request.user.username + generate_random_code()
-        session_id = generate_random_code()
 
-        print("room", settings.LIVEKIT_ROOM_NAME + session_id)
-        random_code = ''.join(random.choices(string.ascii_letters + string.digits, k=4))
+        # Get `room` and `identity` from request parameters
+        room_name = request.query_params.get('Room')
+        identity = request.query_params.get('Identity')
+
+        if not room_name or not identity:
+            return Response(
+                {"error": "Both 'room' and 'identity' parameters are required."},
+                status=400
+            )
+
+        # Create token with identity and video grants
         token = api.AccessToken(api_key, api_secret) \
             .with_identity(identity) \
             .with_name("Tranqui AI Assistant") \
             .with_grants(
             api.VideoGrants(
                 room_join=True,
-                room=settings.LIVEKIT_ROOM_NAME + generate_random_code(),  # Customize your room name here
+                room=room_name + generate_random_code(),
             )
         )
-        self.token = token.to_jwt()
-        # Return the token as a response
+
+        # Return the token
         return Response({"Livekit access token": token.to_jwt()})
 
 

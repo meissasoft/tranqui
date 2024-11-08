@@ -3,7 +3,7 @@ from .models import User, OTP, Chat
 
 
 class ChatAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'prompt', 'response', 'session_id', 'created_at')
+    list_display = ('id', 'user', 'prompt', 'response', 'created_at')
 
 
 class OTPAdmin(admin.ModelAdmin):
