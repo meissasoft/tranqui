@@ -428,7 +428,6 @@ class CreateChatView(generics.CreateAPIView):
 
 class GetLiveKitToken(APIView):
     permission_classes = [IsAuthenticated]
-    room = rtc.Room()
 
     @swagger_auto_schema(
         manual_parameters=[
