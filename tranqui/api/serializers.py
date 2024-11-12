@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError, ErrorDetail
 from .utils import get_google_user_info
 from .models import User, OTP, Chat
 
@@ -55,6 +55,31 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError(f"An unexpected error occurred: {str(e)}")
         attrs['user'] = user
         return attrs
+
+    def is_valid(self, raise_exception=False):
+        try:
+            # Attempt standard validation
+            valid = super().is_valid(raise_exception=True)
+            return valid
+
+        except serializers.ValidationError as exc:
+            # Initialize custom error structure
+            custom_errors = {}
+
+            # Check if the error includes non_field_errors
+            if 'non_field_errors' in exc.detail:
+                # Get the first error message from non_field_errors and convert to string
+                # print(type(exc.detail['non_field_errors'][0]))
+                # non_field_error_message = exc.detail['non_field_errors'][0]
+                # custom_errors['error'] = non_field_error_message.split(":")[1]
+                custom_errors['error'] = "Login failed, Invalid email or password"
+            else:
+                # Standard error processing for other fields
+                custom_errors['errors'] = {
+                    field: [str(msg) for msg in messages]  # Convert each ErrorDetail to a string
+                    for field, messages in exc.detail.items()
+                }
+            raise serializers.ValidationError(custom_errors)
 
 
 # Serializer for updating user profile

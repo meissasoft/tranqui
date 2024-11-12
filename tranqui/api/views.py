@@ -46,7 +46,7 @@ class LoginView(generics.GenericAPIView):
             ValidationError: If email or password are invalid or authentication fails.
         """
         serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        serializer.is_valid()
 
         email = serializer.validated_data['email']
         password = serializer.validated_data['password']
