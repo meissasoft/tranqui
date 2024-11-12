@@ -176,7 +176,6 @@ class GoogleSignInSerializer(serializers.Serializer):
 
 # Serializer for chat requests
 class ChatRequestSerializer(serializers.Serializer):
-    session_id = serializers.CharField(max_length=100, required=False, allow_null=True)
     prompt = serializers.CharField()
 
     def validate_prompt(self, value):
@@ -190,4 +189,4 @@ class ChatRequestSerializer(serializers.Serializer):
 class ChatSerializer(serializers.ModelSerializer):
     class Meta:
         model = Chat
-        fields = ['id', 'user', 'session_id', 'prompt', 'total_tokens', 'response']
+        fields = ['id', 'user', 'prompt', 'response']
