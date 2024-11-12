@@ -415,6 +415,7 @@ class CreateChatView(generics.CreateAPIView):
                         # Create Chat instance
                         chat = Chat(user=user, prompt=prompt, response=response)
                         chat.save()
+                        print("chat saved in database successfully. ")
                     except User.DoesNotExist:
                         return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
                     except InvalidTokenError:
@@ -432,10 +433,10 @@ class GetLiveKitToken(APIView):
     @swagger_auto_schema(
         manual_parameters=[
             openapi.Parameter(
-                name='Room', in_=openapi.IN_QUERY, description="Room name", type=openapi.TYPE_STRING, required=False
+                name='room', in_=openapi.IN_QUERY, description="Room name", type=openapi.TYPE_STRING, required=False
             ),
             openapi.Parameter(
-                name='Identity', in_=openapi.IN_QUERY, description="User identity", type=openapi.TYPE_STRING,
+                name='identity', in_=openapi.IN_QUERY, description="User identity", type=openapi.TYPE_STRING,
                 required=False
             )
         ]
@@ -446,8 +447,8 @@ class GetLiveKitToken(APIView):
         api_secret = settings.LIVEKIT_API_SECRET
 
         # Get `room` and `identity` from request parameters
-        room_name = request.query_params.get('Room')
-        identity = request.query_params.get('Identity')
+        room_name = request.query_params.get('room')
+        identity = request.query_params.get('identity')
 
         if not room_name or not identity:
             return Response(
