@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import requests
 from django.conf import settings
@@ -11,13 +12,13 @@ from livekit.plugins import openai, silero, deepgram
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
 
 CHAT_API_URL = settings.CHAT_API_URL
 conversation_history = {}
 
 
 async def entrypoint(ctx: JobContext):
-
     initial_ctx = llm.ChatContext().append(
         role="system",
         text=(
@@ -26,7 +27,6 @@ async def entrypoint(ctx: JobContext):
         ),
     )
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-
     assistant = VoiceAssistant(
         vad=silero.VAD.load(),
         stt=deepgram.STT(model="nova-2-general", language="en-US"),
@@ -45,34 +45,27 @@ async def entrypoint(ctx: JobContext):
     def on_track_subscribed(
             track: rtc.Track,
             publication: rtc.TrackPublication,
-            participant: rtc.RemoteParticipant,
+            remote_participant: rtc.RemoteParticipant,
     ):
         if track.kind == rtc.TrackKind.KIND_AUDIO:
-            print("audio track: ", track)
-            # asyncio.create_task(do_something(track))
+            logger.info(msg=f"audio track: {track}")
 
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
-            print("video track: ", track)
-            # asyncio.create_task(do_something(track))
+            logger.info(msg=f"video track: {track}")
 
     @assistant.on("user_speech_committed")
     def on_user_speech_committed(msg: llm.ChatMessage):
         nonlocal current_prompt
-        # Store the user prompt
         current_prompt = msg.content
-        print("user message:", current_prompt)
+        logger.info(msg=f"user message: {current_prompt}")
 
     @assistant.on("agent_speech_committed")
     def on_agent_speech_committed(msg: llm.ChatMessage):
         if current_prompt:
-            token = participant.identity  # Assuming participant.identity holds the token
+            token = participant.identity
             room = ctx.room.name
-            print("room in livekit:", room)
-            print("identity in livekit:", token)
             identity_list = ctx.room.remote_participants.keys()
             user_identity = list(identity_list)[0]
-            print("user:", user_identity)
-
             data = {
                 "user_key": user_identity,
                 "prompt": current_prompt,
@@ -86,13 +79,21 @@ async def entrypoint(ctx: JobContext):
             try:
                 response = requests.post(CHAT_API_URL, json=data, headers=headers)
                 if response.status_code == 201:
-                    print("Chat successfully saved to Django server.")
+                    logger.info(msg="Chat successfully saved to Django server.")
                 else:
-                    print("Failed to save chat:", response.json())
+                    logger.info(msg=f"Failed to save chat:{response.json()}")
             except requests.exceptions.RequestException as e:
-                print("Error connecting to Django server:", e)
+                logger.error(f"Error connecting to Django server:{e}")
 
-            print("Conversation updated:", current_prompt, "->", msg.content)
+            logger.info(msg=f"Conversation updated: {current_prompt}, -> {msg.content}")
+
+    @assistant.on("agent_started_speaking")
+    def on_agent_speech_started():
+        logger.info(msg="Agent is speaking")
+
+    @assistant.on("agent_speech_interrupted")
+    def on_agent_speech_interrupted(msg: llm.ChatMessage):
+        logger.info(msg="Agent interrupted")
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))

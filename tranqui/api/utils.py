@@ -1,3 +1,4 @@
+import logging
 import os
 import smtplib
 from email.mime.text import MIMEText
@@ -6,6 +7,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 EMAIL_SENDER = os.getenv('EMAIL_SENDER')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
@@ -48,13 +51,11 @@ def send_verification_email(email, otp_code):
     msg['To'] = email
 
     try:
-        print(EMAIL_SENDER, EMAIL_PASSWORD)
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(EMAIL_SENDER, "xtmr tqhv omjn epny")
+        with smtplib.SMTP_SSL(host='smtp.gmail.com', port=465) as server:
+            server.login(user=EMAIL_SENDER, password=EMAIL_PASSWORD)
             server.sendmail(EMAIL_SENDER, email, msg.as_string())
-        print("Email sent successfully!")
     except smtplib.SMTPAuthenticationError as e:
-        print(f"Error: {e}")
+        logger.error(msg=f"Error in sending OTP: {e}")
 
 
 def get_google_user_info(token: str):
