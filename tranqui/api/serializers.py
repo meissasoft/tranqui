@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError, ErrorDetail
 from .utils import get_google_user_info
 from .models import User, OTP, Chat
 
@@ -149,13 +149,10 @@ class GoogleSignInSerializer(serializers.Serializer):
     def validate_token(self, value):
         """Validate the Google token by making a request to Google's API."""
         user_info = get_google_user_info(value)
-
         if not user_info.get('email'):
             raise ValidationError("Unable to retrieve email from Google account.")
         if not user_info.get('email_verified'):
             raise ValidationError("Google email is not verified.")
-
-        self.user_info = user_info
         return value
 
     def create_or_update_user(self):
@@ -176,7 +173,6 @@ class GoogleSignInSerializer(serializers.Serializer):
 
 # Serializer for chat requests
 class ChatRequestSerializer(serializers.Serializer):
-    session_id = serializers.CharField(max_length=100, required=False, allow_null=True)
     prompt = serializers.CharField()
 
     def validate_prompt(self, value):
@@ -190,4 +186,4 @@ class ChatRequestSerializer(serializers.Serializer):
 class ChatSerializer(serializers.ModelSerializer):
     class Meta:
         model = Chat
-        fields = ['id', 'user', 'session_id', 'prompt', 'total_tokens', 'response']
+        fields = ['id', 'user', 'prompt', 'response']

@@ -71,9 +71,7 @@ class Chat(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     prompt = models.TextField()
     response = models.TextField()
-    session_id = models.CharField(max_length=100, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    total_tokens = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "api_chat"
