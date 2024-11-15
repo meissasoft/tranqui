@@ -44,12 +44,10 @@ class UserManager(BaseUserManager):
 
 class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
-    username = models.CharField(max_length=150, unique=True)
     is_verified = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False, help_text='Designates whether the user can log into this admin site.')
 
     USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['username']
 
     objects = UserManager()
 
@@ -77,4 +75,4 @@ class Chat(models.Model):
         db_table = "api_chat"
 
     def __str__(self):
-        return f"Chat {self.id} - User {self.user.username}"
+        return f"Chat {self.id} - User {self.user}"
