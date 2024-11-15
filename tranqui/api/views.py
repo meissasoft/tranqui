@@ -230,7 +230,7 @@ class VerifyOTPView(generics.CreateAPIView):
                 token = get_jwt_token(user)
                 otp_record.delete()
                 logger.info(f"OTP verified successfully for user: {email}")
-                return Response({"msg": "OTP verified successfully", "token": token.get('access')},
+                return Response({"message": "OTP verified successfully", "token": token.get('access')},
                                 status=status.HTTP_200_OK)
             elif otp_record.otp != otp_code:
                 logger.warning(f"Invalid OTP against user: {email}")
