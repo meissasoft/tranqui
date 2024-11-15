@@ -22,11 +22,29 @@ async def entrypoint(ctx: JobContext):
     initial_ctx = llm.ChatContext().append(
         role="system",
         text=(
-            "You are a user friendly voice assistant created. Your interface with users will be voice. "
-            "You should use short and concise responses, and avoiding usage of unpronouncable punctuation."
+            "You are a user-friendly voice assistant. Your interface with users will be voice. "
+            "You should use short and concise responses, avoiding usage of unpronounceable punctuation."
         ),
     )
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+
+    # List of unique greeting messages
+    greetings = [
+        "Hi there! I'd love to get to know you better. What's your name?",
+        "Hello! I'm here to help. Could you tell me your name to get started?",
+        "Hey! Thanks for joining me. May I know your name?",
+        "Hi! I'm excited to chat with you. What's your name?",
+        "Greetings! To make this personal, could you share your name with me?",
+        "Hello! Let's make this a bit more friendly. May I know your name?",
+        "Hey there! I'd like to call you by name. What's your name?",
+        "Hi! It's great to meet you. May I know what I should call you?",
+        "Hello! Before we dive in, could you let me know your name?",
+        "Hey! I'm here and ready to assist. Can you tell me your name first?",
+    ]
+
+    # Choose a random greeting message
+    chosen_greeting = random.choice(greetings)
+
     assistant = VoiceAssistant(
         vad=silero.VAD.load(),
         stt=deepgram.STT(model="nova-2-general", language="en-US"),
@@ -37,8 +55,9 @@ async def entrypoint(ctx: JobContext):
     assistant.start(ctx.room)
 
     await asyncio.sleep(1)
-    await assistant.say("Hello, I am Tranqui AI assistant, how can I help you today!", allow_interruptions=True)
+    await assistant.say(source=chosen_greeting, allow_interruptions=True)
     current_prompt = None
+
     participant = await ctx.wait_for_participant()
 
     @ctx.room.on("track_subscribed")
@@ -92,7 +111,7 @@ async def entrypoint(ctx: JobContext):
         logger.info(msg="Agent is speaking")
 
     @assistant.on("agent_speech_interrupted")
-    def on_agent_speech_interrupted(msg: llm.ChatMessage):
+    def on_agent_speech_interrupted():
         logger.info(msg="Agent interrupted")
 
 if __name__ == "__main__":

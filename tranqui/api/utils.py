@@ -1,10 +1,12 @@
 import logging
 import os
 import smtplib
+import string
 from email.mime.text import MIMEText
 import requests
 from rest_framework_simplejwt.tokens import RefreshToken
 from dotenv import load_dotenv
+import random
 
 load_dotenv()
 
@@ -77,3 +79,13 @@ def get_google_user_info(token: str):
     )
     response.raise_for_status()
     return response.json()
+
+
+def generate_otp():
+    """Generates a 6-digit OTP."""
+    return str(random.randint(a=100000, b=999999))
+
+
+def generate_random_code() -> str:
+    random_code = ''.join(random.choices(string.ascii_letters + string.digits, k=4))
+    return f"-{random_code}"
