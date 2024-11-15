@@ -17,8 +17,60 @@ from .serializers import *
 from .models import *
 from .utils import *
 
+# Auth views
 
-class LoginView(generics.GenericAPIView):
+
+class UserRegistrationView(generics.CreateAPIView):
+    """
+    Handles user registration via POST requests.
+    """
+    serializer_class = RegisterSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        email = request.data.get('email')
+        if email:
+            user = User.objects.filter(email=email).first()
+            if user:
+                if not user.is_verified:
+                    otp_code = generate_otp()
+                    try:
+                        send_verification_email(email, otp_code)
+                        otp_entry, created = OTP.objects.get_or_create(email=email)
+                        otp_entry.otp = otp_code
+                        otp_entry.save(update_fields=['otp'])
+                        return Response(data={
+                            "message": f"This email is already registered but never verified. New OTP sent to {email}."},
+                                        status=status.HTTP_200_OK)
+                    except Exception as e:
+                        logger.error(f"Error sending OTP to {email}: {str(e)}")
+                        return Response({"error": "Failed to send OTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                else:
+                    return Response(data={
+                        "message": "A user with this email already exists. "},
+                                    status=status.HTTP_400_BAD_REQUEST)
+        if serializer.is_valid():
+            try:
+                user = serializer.save()
+                otp_code = generate_otp()
+                send_verification_email(email, otp_code)
+                OTP.objects.create(email=email, otp=otp_code)
+                return Response(
+                    {"message": f"OTP sent to {email}"},
+                    status=status.HTTP_201_CREATED
+                )
+            except Exception as e:
+                logger.error(f"Error during registration: {str(e)}")
+                return Response(
+                    {"error": "An error occurred while registering. Please try again later."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
+        else:
+            return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserLoginView(generics.GenericAPIView):
     """
     Handles user login.
     """
@@ -27,7 +79,8 @@ class LoginView(generics.GenericAPIView):
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
-            return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            error_message = "Invalid email or password."
+            return Response(data={"error": error_message}, status=status.HTTP_400_BAD_REQUEST)
         else:
             email = serializer.validated_data['email']
             password = serializer.validated_data['password']
@@ -76,7 +129,7 @@ class LoginView(generics.GenericAPIView):
             )
 
 
-class ProfileUpdateView(generics.UpdateAPIView):
+class UserProfileUpdateView(generics.UpdateAPIView):
     """
     ProfileUpdateView allows authenticated users to update their profile details.
     It handles HTTP PUT requests and expects a valid profile update payload.
@@ -122,57 +175,7 @@ class ProfileUpdateView(generics.UpdateAPIView):
             )
 
 
-class RegisterUserView(generics.CreateAPIView):
-    """
-    Handles user registration via POST requests.
-    """
-    serializer_class = RegisterSerializer
-    permission_classes = [AllowAny]
-
-    def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        email = request.data.get('email')
-        if email:
-            user = User.objects.filter(email=email).first()
-            if user:
-                if not user.is_verified:
-                    otp_code = generate_otp()
-                    try:
-                        send_verification_email(email, otp_code)
-                        otp_entry, created = OTP.objects.get_or_create(email=email)
-                        otp_entry.otp = otp_code
-                        otp_entry.save(update_fields=['otp'])
-                        return Response(data={
-                            "message": f"This email is already registered but not verified. New OTP sent to {email}."},
-                                        status=status.HTTP_200_OK)
-                    except Exception as e:
-                        logger.error(f"Error sending OTP to {email}: {str(e)}")
-                        return Response({"error": "Failed to send OTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-                else:
-                    return Response(data={
-                        "message": "A user with this email already exists. Please sign in with this email or use a different one."},
-                                    status=status.HTTP_400_BAD_REQUEST)
-        if serializer.is_valid():
-            try:
-                user = serializer.save()
-                otp_code = generate_otp()
-                send_verification_email(email, otp_code)
-                OTP.objects.create(email=email, otp=otp_code)
-                return Response(
-                    {"message": f"OTP sent to {email}"},
-                    status=status.HTTP_201_CREATED
-                )
-            except Exception as e:
-                logger.error(f"Error during registration: {str(e)}")
-                return Response(
-                    {"error": "An error occurred while registering. Please try again later."},
-                    status=status.HTTP_503_SERVICE_UNAVAILABLE
-                )
-        else:
-            return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class ResetPasswordView(generics.UpdateAPIView):
+class PasswordResetRequestView(generics.UpdateAPIView):
     serializer_class = ResetPasswordSerializer
     http_method_names = ['patch']
 
@@ -199,7 +202,42 @@ class ResetPasswordView(generics.UpdateAPIView):
             return Response({"message": "Verify the OTP to proceed further."}, status=status.HTTP_200_OK)
 
 
-class VerifyOTPView(generics.CreateAPIView):
+class PasswordResetVerificationView(generics.GenericAPIView):
+    serializer_class = VerifyResetCodeSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            otp = serializer.validated_data['otp']
+            new_password = serializer.validated_data['new_password']
+        else:
+            return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            otp_record = OTP.objects.get(otp=otp)
+            if not otp_record.is_valid():
+                logger.warning(f"OTP expired for email: {otp_record.email}")
+                return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
+            email = otp_record.email
+            user = User.objects.get(email=email)
+            user.set_password(new_password)
+            user.save()
+            otp_record.delete()
+            logger.info(f"Password reset successfully for user: {email}")
+            return Response({"message": "Password has been updated successfully."}, status=status.HTTP_200_OK)
+        except OTP.DoesNotExist:
+            logger.warning("Invalid OTP provided.")
+            return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+        except User.DoesNotExist:
+            logger.error(f"User not found for email: {email}")
+            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"An error occurred while resetting the password: {str(e)}")
+            return Response({"error": "An unexpected error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# OTP views
+
+class OTPVerificationView(generics.CreateAPIView):
     """
     Handles OTP verification for user accounts.
     """
@@ -253,7 +291,7 @@ class VerifyOTPView(generics.CreateAPIView):
             raise NotFound(f"User with email `{email}` does not exists")
 
 
-class ResendOTPView(generics.CreateAPIView):
+class OTPRetryView(generics.CreateAPIView):
     """
     Handles resending OTP to the user's email.
     """
@@ -283,40 +321,7 @@ class ResendOTPView(generics.CreateAPIView):
             return Response({"message": "OTP resent successfully."}, status=status.HTTP_200_OK)
 
 
-class VerifyResetCodeView(generics.GenericAPIView):
-    serializer_class = VerifyResetCodeSerializer
-
-    def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        if serializer.is_valid():
-            otp = serializer.validated_data['otp']
-            new_password = serializer.validated_data['new_password']
-        else:
-            return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            otp_record = OTP.objects.get(otp=otp)
-            if not otp_record.is_valid():
-                logger.warning(f"OTP expired for email: {otp_record.email}")
-                return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
-            email = otp_record.email
-            user = User.objects.get(email=email)
-            user.set_password(new_password)
-            user.save()
-            otp_record.delete()
-            logger.info(f"Password reset successfully for user: {email}")
-            return Response({"message": "Password has been updated successfully."}, status=status.HTTP_200_OK)
-        except OTP.DoesNotExist:
-            logger.warning("Invalid OTP provided.")
-            return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
-        except User.DoesNotExist:
-            logger.error(f"User not found for email: {email}")
-            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            logger.error(f"An error occurred while resetting the password: {str(e)}")
-            return Response({"error": "An unexpected error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-class GoogleSignInView(generics.GenericAPIView):
+class GoogleOAuthSignInView(generics.GenericAPIView):
     serializer_class = GoogleSignInSerializer
 
     def post(self, request, *args, **kwargs):
@@ -338,27 +343,10 @@ class GoogleSignInView(generics.GenericAPIView):
             return Response(data={"error": "An unexpected error occurred. Please try again later."},
                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-class GetAllChatsView(generics.ListAPIView):
-    """
-    Retrieves all chats for the authenticated user.
-    """
-    serializer_class = ChatSerializer
-
-    def get(self, request, *args, **kwargs):
-        try:
-            user = request.user
-            if user.is_anonymous:
-                return Response({"error": "Authentication credentials were not provided."},
-                                status=status.HTTP_401_UNAUTHORIZED)
-            chats = Chat.objects.filter(user=user)
-            serializer = self.get_serializer(chats, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response(data={"error": e}, status=status.HTTP_400_BAD_REQUEST)
+# Chat Views
 
 
-class CreateChatView(generics.CreateAPIView):
+class ChatCreationView (generics.CreateAPIView):
     """
     Creates a new Chat instance for a given user.
     """
@@ -390,7 +378,28 @@ class CreateChatView(generics.CreateAPIView):
             return Response({"error": "Invalid token header"}, status=401)
 
 
-class GetLiveKitToken(APIView):
+class UserChatsListView (generics.ListAPIView):
+    """
+    Retrieves all chats for the authenticated user.
+    """
+    serializer_class = ChatSerializer
+
+    def get(self, request, *args, **kwargs):
+        try:
+            user = request.user
+            if user.is_anonymous:
+                return Response({"error": "Authentication credentials were not provided."},
+                                status=status.HTTP_401_UNAUTHORIZED)
+            chats = Chat.objects.filter(user=user)
+            serializer = self.get_serializer(chats, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(data={"error": e}, status=status.HTTP_400_BAD_REQUEST)
+
+# Livekit Views
+
+
+class GenerateLiveKitTokenView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
