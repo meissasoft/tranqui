@@ -6,7 +6,7 @@ from .models import User, OTP, Chat
 
 # Serializer for registering a new user
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=8)
+    password = serializers.CharField(write_only=True, min_length=6)
 
     class Meta:
         model = User
@@ -111,7 +111,7 @@ class VerifyOTPSerializer(serializers.Serializer):
 # Serializer for validating the OTP code and resetting the password
 class VerifyResetCodeSerializer(serializers.Serializer):
     otp = serializers.CharField(max_length=6)
-    new_password = serializers.CharField(min_length=8, write_only=True)
+    new_password = serializers.CharField(min_length=6, write_only=True)
 
     def validate_otp(self, value):
         """Check if the OTP exists and is valid."""
