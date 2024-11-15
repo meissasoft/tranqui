@@ -1,27 +1,21 @@
-import logging
-import string
-from django.db import transaction, DatabaseError
+import jwt
+from livekit import api
+from requests import HTTPError
+from jwt import ExpiredSignatureError, InvalidTokenError
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
-from jwt import ExpiredSignatureError, InvalidTokenError
-from livekit import api
-import jwt
 from django.conf import settings
 from django.contrib.auth import authenticate
-from requests import HTTPError
+from django.db import transaction, DatabaseError
 from rest_framework import generics
 from rest_framework.exceptions import NotFound, NotAuthenticated
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from django.utils import timezone
 from rest_framework.views import APIView
-from .utils import get_jwt_token, send_verification_email
-from .serializers import *
 from rest_framework import status
 from rest_framework.response import Response
-from .models import User, OTP, Chat
-import random
-
-logger = logging.getLogger(__name__)
+from .serializers import *
+from .models import *
+from .utils import *
 
 
 class LoginView(generics.GenericAPIView):
@@ -31,19 +25,6 @@ class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
 
     def post(self, request, *args, **kwargs):
-        """
-        Handles POST requests for user login.
-
-        Args:
-            request (Request): The request object containing email and password.
-
-        Returns:
-            Response: A response object with a success message and JWT token if login
-            is successful, or an error message if login fails.
-
-        Raises:
-            ValidationError: If email or password are invalid or authentication fails.
-        """
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
             return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -66,7 +47,7 @@ class LoginView(generics.GenericAPIView):
                 return Response(
                     data={
                         "message": "Login successful!",
-                        "Access Token": token.get('access')
+                        "token": token.get('access')
                     },
                     status=status.HTTP_200_OK
                 )
@@ -104,57 +85,35 @@ class ProfileUpdateView(generics.UpdateAPIView):
     http_method_names = ['put']
 
     def put(self, request, *args, **kwargs):
-        """
-        Handles the profile update process.
-
-        Raises:
-            ValidationError: If the input data is invalid.
-            NotAuthenticated: If the user is not authenticated.
-            DatabaseError: If an error occurs while saving the data to the database.
-        """
-        # Ensure the request is made by an authenticated user
         if not request.user.is_authenticated:
             raise NotAuthenticated(detail="User must be authenticated to update the profile.")
-
         serializer = self.get_serializer(data=request.data)
         try:
-            # Validate serializer data
             if not serializer.is_valid():
                 return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
             user = serializer.validated_data
             if 'password' in serializer.validated_data:
                 user.set_password(serializer.validated_data.get('password'))
                 with transaction.atomic():
                     user.save()
-                return Response(
-                    data={"message": "Profile updated successfully!"},
-                    status=status.HTTP_200_OK
-                )
+                return Response(data={"message": "Profile updated successfully!"}, status=status.HTTP_200_OK)
             else:
-                return Response(
-                    data={"error": f"Failed to update profile with email {user.email}."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
+                return Response(data={"error": f"Failed to update profile with email {user.email}."},
+                                status=status.HTTP_400_BAD_REQUEST)
         except ValidationError as e:
             logger.error(f"Validation error: {e}")
             return Response(data={"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         except DatabaseError as e:
             logger.error(f"Database error during profile update: {e}")
-            return Response(
-                data={"error": "A database error occurred. Please try again later."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
+            return Response(data={"error": "A database error occurred. Please try again later."},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except AttributeError as e:
             logger.error(f"Attribute error during profile update: {e}")
             return Response(
                 data={"error": f"Attribute error during profile update: {e}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
         except Exception as e:
             logger.error(f"Unexpected error during profile update: {e}")
             return Response(
@@ -166,53 +125,51 @@ class ProfileUpdateView(generics.UpdateAPIView):
 class RegisterUserView(generics.CreateAPIView):
     """
     Handles user registration via POST requests.
-
-    Attributes:
-        serializer_class (RegisterSerializer): Serializer for user registration.
-        permission_classes (list): List of permissions for this view.
     """
     serializer_class = RegisterSerializer
     permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
-        """
-        Handles POST requests for user registration.
-
-        Args:
-            request (Request): The request object containing user registration data.
-
-        Returns:
-            Response: A response containing a success message if the user
-            is registered successfully and the OTP is sent, or an error message
-            if registration fails.
-
-        Raises:
-            ValidationError: If the provided data is invalid.
-        """
         serializer = self.get_serializer(data=request.data)
+        email = request.data.get('email')
+        if email:
+            user = User.objects.filter(email=email).first()
+            if user:
+                if not user.is_verified:
+                    otp_code = generate_otp()
+                    try:
+                        send_verification_email(email, otp_code)
+                        otp_entry, created = OTP.objects.get_or_create(email=email)
+                        otp_entry.otp = otp_code
+                        otp_entry.save(update_fields=['otp'])
+                        return Response(data={
+                            "message": f"This email is already registered but not verified. New OTP sent to {email}."},
+                                        status=status.HTTP_200_OK)
+                    except Exception as e:
+                        logger.error(f"Error sending OTP to {email}: {str(e)}")
+                        return Response({"error": "Failed to send OTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                else:
+                    return Response(data={
+                        "message": "A user with this email already exists. Please sign in with this email or use a different one."},
+                                    status=status.HTTP_400_BAD_REQUEST)
         if serializer.is_valid():
-            user = serializer.save()
-            otp_code = self.generate_otp()
-            email = serializer.validated_data.get('email')
             try:
-                self.send_otp_email(email, otp_code)
+                user = serializer.save()
+                otp_code = generate_otp()
+                send_verification_email(email, otp_code)
                 OTP.objects.create(email=email, otp=otp_code)
-                return Response({"message": f"OTP sent to {email}"}, status=status.HTTP_201_CREATED)
+                return Response(
+                    {"message": f"OTP sent to {email}"},
+                    status=status.HTTP_201_CREATED
+                )
             except Exception as e:
-                logger.error(f"Error sending OTP to {email}: {str(e)}")
-                return Response({"error": "Failed to send OTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                logger.error(f"Error during registration: {str(e)}")
+                return Response(
+                    {"error": "An error occurred while registering. Please try again later."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
         else:
             return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    @staticmethod
-    def generate_otp():
-        """Generates a 6-digit OTP."""
-        return str(random.randint(100000, 999999))
-
-    @staticmethod
-    def send_otp_email(email, otp_code):
-        """Sends the OTP to the user's email."""
-        send_verification_email(email, otp_code)
 
 
 class ResetPasswordView(generics.UpdateAPIView):
@@ -220,26 +177,11 @@ class ResetPasswordView(generics.UpdateAPIView):
     http_method_names = ['patch']
 
     def patch(self, request, *args, **kwargs):
-        """
-            Handles PATCH requests for resetting user passwords.
-
-            Args:
-                request (Request): The request object containing the email and new password.
-
-            Returns:
-                Response: A response object containing a success message if the OTP
-                is sent successfully, or an error message if the request fails.
-
-            Raises:
-                ValidationError: If the provided data is invalid.
-            """
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         email = serializer.validated_data['email']
         if serializer.is_valid():
-            otp_code = str(random.randint(100000, 999999))  # Generate a 6-digit OTP
-
+            otp_code = str(random.randint(a=100000, b=999999))  # Generate a 6-digit OTP
             try:
                 send_verification_email(email, otp_code)
                 # OTP.objects.create(email=email, otp=otp_code)
@@ -260,75 +202,91 @@ class ResetPasswordView(generics.UpdateAPIView):
 class VerifyOTPView(generics.CreateAPIView):
     """
     Handles OTP verification for user accounts.
-
-    Attributes:
-        queryset (QuerySet): The queryset for OTP objects.
-        serializer_class (VerifyOTPSerializer): Serializer for verifying the OTP.
     """
     queryset = OTP.objects.all()
     serializer_class = VerifyOTPSerializer
 
     def post(self, request, *args, **kwargs):
-        """
-        Handles POST requests for verifying the OTP.
-
-        Args:
-            request (Request): The request object containing the email and OTP.
-
-        Returns:
-            Response: A response object containing a success message and JWT token
-            if the OTP verification is successful, or an error message if the
-            verification fails.
-
-        Raises:
-            ValidationError: If the provided OTP is invalid or expired.
-        """
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
             return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         else:
             email = serializer.validated_data['email']
             otp_code = serializer.validated_data['otp']
-
         try:
-            otp_record = OTP.objects.get(email=email, otp=otp_code)
-            if not otp_record.is_valid():
-                logger.warning(f"OTP expired for email: {email}")
-                return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
-            user = User.objects.get(email=email)
-            user.is_verified = True
-            user.save()
-            token = get_jwt_token(user)
-            otp_record.delete()
-            logger.info(f"OTP verified successfully for user: {email}")
-            return Response({"msg": "OTP verified successfully", "token": token.get('access')},
-                            status=status.HTTP_200_OK)
+            otp_record = OTP.objects.get(email=email)
+            if not otp_record:
+                logger.warning(f"OTP not found in database against user: {email}")
+                return Response(
+                    data={
+                        "error": f"OTP not found in database against user: {email}"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            elif otp_record.otp == otp_code:
+                user = User.objects.get(email=email)
+                user.is_verified = True
+                user.save()
+                token = get_jwt_token(user)
+                otp_record.delete()
+                logger.info(f"OTP verified successfully for user: {email}")
+                return Response({"msg": "OTP verified successfully", "token": token.get('access')},
+                                status=status.HTTP_200_OK)
+            elif otp_record.otp != otp_code:
+                logger.warning(f"Invalid OTP against user: {email}")
+                return Response(
+                    data={
+                        "error": f"Invalid OTP against user: {email}"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         except OTP.DoesNotExist:
-            logger.error(f"Invalid OTP attempt for email: {email}")
-            return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+            logger.error(f"No OTP found for the provided email: {email}")
+            return Response(
+                data={
+                    "error": f"No OTP found for the provided email: {email}"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
         except User.DoesNotExist:
-            logger.error(f"User not found during OTP verification for email: {email}")
-            raise NotFound("User not found.")
+            logger.error(f"User with email `{email}` does not exists")
+            raise NotFound(f"User with email `{email}` does not exists")
+
+
+class ResendOTPView(generics.CreateAPIView):
+    """
+    Handles resending OTP to the user's email.
+    """
+    serializer_class = VerifyOTPSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            email = serializer.validated_data["email"]
+            if not email:
+                logger.error("Email is missing in the request.")
+                return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+            user = User.objects.get(email=email)
+            if not user:
+                logger.error(f"No user found with the email: {email}")
+                return Response({"error": f"No user found with the email: {email}"}, status=status.HTTP_404_NOT_FOUND)
+            otp = OTP.objects.get(email=email)
+            if otp:
+                logger.info(f"Previous OTP: {otp.otp}")
+                new_otp = generate_otp()
+                otp.otp = new_otp
+                otp.save()
+                send_verification_email(email, new_otp)
+            logger.info(f"New OTP resent successfully to email: {email}")
+            return Response({"message": "OTP resent successfully."}, status=status.HTTP_200_OK)
 
 
 class VerifyResetCodeView(generics.GenericAPIView):
     serializer_class = VerifyResetCodeSerializer
 
     def post(self, request, *args, **kwargs):
-        """
-        Handles POST requests for validating the OTP and resetting the password.
-
-        Args:
-            request (Request): The request object containing the OTP and new password.
-
-        Returns:
-            Response: A response object containing a success message if the password
-            reset is successful, or an error message if the user is not found or OTP
-            validation fails.
-
-        Raises:
-            ValidationError: If the provided OTP is invalid or expired.
-        """
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
             otp = serializer.validated_data['otp']
@@ -362,20 +320,6 @@ class GoogleSignInView(generics.GenericAPIView):
     serializer_class = GoogleSignInSerializer
 
     def post(self, request, *args, **kwargs):
-        """
-        Handles POST requests for Google sign-in.
-
-        Args:
-            request (Request): The request object containing the Google OAuth token.
-
-        Returns:
-            Response: A response object containing a success message and the user ID
-            upon successful login, or an error message if validation fails.
-
-        Raises:
-            ValidationError: If the provided token is invalid or user information
-            cannot be retrieved.
-        """
         try:
             serializer = self.get_serializer(data=request.data)
             if serializer.is_valid():
@@ -384,15 +328,12 @@ class GoogleSignInView(generics.GenericAPIView):
             else:
                 return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except HTTPError as e:
-            # Log HTTPError and return a more informative response
             logger.error(f"HTTP error during Google sign-in: {e}")
             return Response(data={"error": f"HTTP error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
         except ValidationError as e:
-            # Handle specific validation errors
             logger.error(f"Validation error: {e}")
             return Response(data={"error": "Invalid data received"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            # General exception handling for any unexpected errors
             logger.error(f"Unexpected error during Google sign-in: {e}")
             return Response(data={"error": "An unexpected error occurred. Please try again later."},
                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -486,7 +427,3 @@ class GetLiveKitToken(APIView):
             return Response({"Livekit access token": token.to_jwt()})
         except Exception as e:
             return Response(data={"error": e}, status=status.HTTP_400_BAD_REQUEST)
-
-def generate_random_code() -> str:
-    random_code = ''.join(random.choices(string.ascii_letters + string.digits, k=4))
-    return f"-{random_code}"

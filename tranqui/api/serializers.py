@@ -10,7 +10,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['username', 'email', 'password']
+        fields = ['email', 'password']
 
     def validate_username(self, value):
         """Ensure the username is unique."""
@@ -63,11 +63,10 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['username', 'email', 'password']
+        fields = ['email', 'password']
         extra_kwargs = {
             'email': {'read_only': True},
             'password': {'write_only': True, 'required': False},
-            'username': {'required': False}
         }
 
     def validate(self, attrs):
@@ -85,7 +84,7 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         """Update user profile data."""
-        instance.username = validated_data.get('username', instance.username)
+        instance.email = validated_data.get('email', instance.email)
         if 'password' in validated_data:
             instance.set_password(validated_data['password'])
         instance.save()
@@ -107,25 +106,6 @@ class ResetPasswordSerializer(serializers.Serializer):
 class VerifyOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
     otp = serializers.CharField(max_length=6)
-
-    def validate_email(self, value):
-        """Ensure the provided email exists in the system."""
-        if not User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("Email does not exist.")
-        return value
-
-    def validate_otp(self, value):
-        """Check if the OTP is valid and corresponds to the email."""
-        email = self.initial_data.get('email')
-        otp_record = OTP.objects.filter(email=email).first()
-
-        if not otp_record or not otp_record.is_valid() or otp_record.otp != value:
-            raise serializers.ValidationError("Invalid or expired OTP.")
-
-        user = User.objects.get(email=email)
-        user.is_verified = True
-        user.save()
-        return value
 
 
 # Serializer for validating the OTP code and resetting the password
@@ -164,7 +144,6 @@ class GoogleSignInSerializer(serializers.Serializer):
         user, created = User.objects.get_or_create(
             email=email,
             defaults={
-                'username': username,
                 'password': User.objects.make_random_password()
             }
         )
