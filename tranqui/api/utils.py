@@ -1,9 +1,9 @@
 import logging
-import os
 import smtplib
 import string
 from email.mime.text import MIMEText
 import requests
+from django.conf import settings
 from rest_framework_simplejwt.tokens import RefreshToken
 from dotenv import load_dotenv
 import random
@@ -12,8 +12,8 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-EMAIL_SENDER = os.getenv('EMAIL_SENDER')
-EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
+EMAIL_SENDER = settings.EMAIL_SENDER
+EMAIL_PASSWORD = settings.EMAIL_PASSWORD
 
 
 def get_jwt_token(user):
@@ -87,5 +87,15 @@ def generate_otp():
 
 
 def generate_random_code() -> str:
-    random_code = ''.join(random.choices(string.ascii_letters + string.digits, k=4))
-    return f"-{random_code}"
+    random_code = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
+    return f"{random_code}"
+
+
+def get_facebook_user_info(token):
+    url = f"https://graph.facebook.com/me?fields=id,name,email&access_token={token}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        logger.error(f"Failed to fetch Facebook user info: {response.text}")
+        return None

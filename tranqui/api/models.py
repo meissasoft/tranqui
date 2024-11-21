@@ -1,6 +1,8 @@
 import string
 import random
-from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+import uuid
+
+from django.contrib.auth.models import AbstractUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.utils import timezone
 
@@ -42,13 +44,11 @@ class UserManager(BaseUserManager):
         return password
 
 
-class User(AbstractBaseUser, PermissionsMixin):
-    email = models.EmailField(unique=True)
-    is_verified = models.BooleanField(default=False)
-    is_staff = models.BooleanField(default=False, help_text='Designates whether the user can log into this admin site.')
-
-    USERNAME_FIELD = 'email'
-
+class User(AbstractUser):
+    is_verified = models.BooleanField(
+        default=False,
+        help_text='Indicates if the user has verified their email with a OTP.'
+    )
     objects = UserManager()
 
     def __str__(self):
@@ -65,14 +65,28 @@ class OTP(models.Model):
         return (timezone.now() - self.created_at).seconds <= 3600  # Valid for 1 hour
 
 
+class Conversation(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    name = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "api_conversation"
+
+    def __str__(self):
+        return self.name
+
+
 class Chat(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     prompt = models.TextField()
     response = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="chats")
 
     class Meta:
         db_table = "api_chat"
 
     def __str__(self):
-        return f"Chat {self.id} - User {self.user}"
+        return f"Chat - User {self.user}"

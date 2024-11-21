@@ -2,7 +2,7 @@ from datetime import datetime
 import openai
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from .serializers import ChatRequestSerializer
+from .serializers import ChatSerializer as ChatRequestSerializer
 from django.utils import timezone
 from django.conf import settings
 from .models import User, Chat

@@ -138,6 +138,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
 STATIC_URL = 'static/'
+LOGIN_URL = '/accounts/login/'
+AUTH_USER_MODEL = 'api.User'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
@@ -150,30 +152,27 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
     ),
 }
-LOGIN_URL = '/accounts/login/'
-AUTH_USER_MODEL = 'api.User'
-# myproject/settings.py
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 465
-EMAIL_USE_TLS = True
-
-EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER')
-EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD')
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels.layers.InMemoryChannelLayer',
     },
 }
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
-OPENAI_TOKEN_LIMIT = os.environ.get('OPENAI_TOKEN_LIMIT')
-TOKEN_PER_WORD = os.environ.get('TOKEN_PER_WORD')
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
 }
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 465
+EMAIL_USE_TLS = True
+EMAIL_SENDER = os.environ.get('EMAIL_SENDER')
+EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+OPENAI_TOKEN_LIMIT = os.environ.get('OPENAI_TOKEN_LIMIT')
+TOKEN_PER_WORD = os.environ.get('TOKEN_PER_WORD')
 CHATBOT_NAME = os.environ.get('CHATBOT_NAME')
 SPEECH_FILE_PATH = os.environ.get('SPEECH_FILE_PATH')
 INPUT_FILE_PATH = os.environ.get('INPUT_FILE_PATH')
@@ -186,4 +185,12 @@ LIVEKIT_API_SECRET = os.environ.get('LIVEKIT_API_SECRET')
 LIVEKIT_API_KEY = os.environ.get('LIVEKIT_API_KEY')
 LIVEKIT_API_URL = os.environ.get('LIVEKIT_URL')
 CHAT_API_URL = os.environ.get('CHAT_API_URL')
-
+CHAT_HISTORY_API_URL = os.environ.get('CHAT_HISTORY_API_URL')
+MAX_TOKENS = int(os.environ.get('MAX_TOKENS'))
+TOKENS_PER_WORD = float(os.environ.get('TOKENS_PER_WORD'))
+INITIAL_SYSTEM_PROMPT = os.environ.get('INITIAL_SYSTEM_PROMPT')
+STT_MODEL = os.environ.get('STT_MODEL')
+STT_LANGUAGE = os.environ.get('STT_LANGUAGE')
+LLM_MODEL = os.environ.get('LLM_MODEL')
+LLM_TEMPERATURE = float(os.environ.get('LLM_TEMPERATURE'))
+TTS_VOICE = os.environ.get('TTS_VOICE')

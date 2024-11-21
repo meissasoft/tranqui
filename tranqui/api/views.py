@@ -1,4 +1,6 @@
 import jwt
+from django.db.models import Count
+from django.shortcuts import get_object_or_404
 from livekit import api
 from requests import HTTPError
 from jwt import ExpiredSignatureError, InvalidTokenError
@@ -6,10 +8,13 @@ from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from django.conf import settings
 from django.contrib.auth import authenticate
+from django.contrib.auth.hashers import check_password
 from django.db import transaction, DatabaseError
-from rest_framework import generics
+from rest_framework import generics, viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, NotAuthenticated
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.views import APIView
 from rest_framework import status
 from rest_framework.response import Response
@@ -17,14 +22,15 @@ from .serializers import *
 from .models import *
 from .utils import *
 
+
 # Auth views
 
 
-class UserRegistrationView(generics.CreateAPIView):
+class UserRegistrationView(generics.ListCreateAPIView):
     """
     Handles user registration via POST requests.
     """
-    serializer_class = RegisterSerializer
+    serializer_class = UserRegistrationSerializer
     permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
@@ -42,14 +48,14 @@ class UserRegistrationView(generics.CreateAPIView):
                         otp_entry.save(update_fields=['otp'])
                         return Response(data={
                             "message": f"This email is already registered but never verified. New OTP sent to {email}."},
-                                        status=status.HTTP_200_OK)
+                            status=status.HTTP_200_OK)
                     except Exception as e:
                         logger.error(f"Error sending OTP to {email}: {str(e)}")
                         return Response({"error": "Failed to send OTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
                 else:
                     return Response(data={
                         "message": "A user with this email already exists. "},
-                                    status=status.HTTP_400_BAD_REQUEST)
+                        status=status.HTTP_400_BAD_REQUEST)
         if serializer.is_valid():
             try:
                 user = serializer.save()
@@ -74,7 +80,7 @@ class UserLoginView(generics.GenericAPIView):
     """
     Handles user login.
     """
-    serializer_class = LoginSerializer
+    serializer_class = UserLoginSerializer
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -85,8 +91,10 @@ class UserLoginView(generics.GenericAPIView):
             email = serializer.validated_data['email']
             password = serializer.validated_data['password']
         try:
-            user = authenticate(request, email=email, password=password)
-            if user is not None:
+            print(f"email: {email}, password: {password}")
+            user = User.objects.get(email=email)
+            if user is not None and check_password(password, user.password):
+
                 if not user.is_active:
                     logger.warning(f"Inactive account login attempt: {email}")
                     return Response(
@@ -100,6 +108,9 @@ class UserLoginView(generics.GenericAPIView):
                 return Response(
                     data={
                         "message": "Login successful!",
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "user_id": user.id,
                         "token": token.get('access')
                     },
                     status=status.HTTP_200_OK
@@ -134,49 +145,24 @@ class UserProfileUpdateView(generics.UpdateAPIView):
     ProfileUpdateView allows authenticated users to update their profile details.
     It handles HTTP PUT requests and expects a valid profile update payload.
     """
-    serializer_class = ProfileUpdateSerializer
+    serializer_class = UserProfileSerializer
     http_method_names = ['put']
 
     def put(self, request, *args, **kwargs):
-        if not request.user.is_authenticated:
-            raise NotAuthenticated(detail="User must be authenticated to update the profile.")
-        serializer = self.get_serializer(data=request.data)
-        try:
-            if not serializer.is_valid():
-                return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            user = serializer.validated_data
-            if 'password' in serializer.validated_data:
-                user.set_password(serializer.validated_data.get('password'))
-                with transaction.atomic():
+        serializer = self.get_serializer(data=request.data, instance=request.user)
+        if serializer.is_valid():
+            with transaction.atomic():
+                user = serializer.save()
+                if 'password' in serializer.validated_data:
+                    user.set_password(serializer.validated_data['password'])
                     user.save()
-                return Response(data={"message": "Profile updated successfully!"}, status=status.HTTP_200_OK)
-            else:
-                return Response(data={"error": f"Failed to update profile with email {user.email}."},
-                                status=status.HTTP_400_BAD_REQUEST)
-        except ValidationError as e:
-            logger.error(f"Validation error: {e}")
-            return Response(data={"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"message": "Profile updated successfully!"}, status=status.HTTP_200_OK)
 
-        except DatabaseError as e:
-            logger.error(f"Database error during profile update: {e}")
-            return Response(data={"error": "A database error occurred. Please try again later."},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        except AttributeError as e:
-            logger.error(f"Attribute error during profile update: {e}")
-            return Response(
-                data={"error": f"Attribute error during profile update: {e}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except Exception as e:
-            logger.error(f"Unexpected error during profile update: {e}")
-            return Response(
-                data={"error": "An unexpected error occurred. Please try again later."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class PasswordResetRequestView(generics.UpdateAPIView):
-    serializer_class = ResetPasswordSerializer
+    serializer_class = PasswordResetSerializer
     http_method_names = ['patch']
 
     def patch(self, request, *args, **kwargs):
@@ -203,7 +189,7 @@ class PasswordResetRequestView(generics.UpdateAPIView):
 
 
 class PasswordResetVerificationView(generics.GenericAPIView):
-    serializer_class = VerifyResetCodeSerializer
+    serializer_class = PasswordChangeConfirmationSerializer
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -242,7 +228,7 @@ class OTPVerificationView(generics.CreateAPIView):
     Handles OTP verification for user accounts.
     """
     queryset = OTP.objects.all()
-    serializer_class = VerifyOTPSerializer
+    serializer_class = OTPVerificationSerializer
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -268,8 +254,15 @@ class OTPVerificationView(generics.CreateAPIView):
                 token = get_jwt_token(user)
                 otp_record.delete()
                 logger.info(f"OTP verified successfully for user: {email}")
-                return Response({"message": "OTP verified successfully", "token": token.get('access')},
-                                status=status.HTTP_200_OK)
+                return Response(
+                    data={
+                        "message": "OTP verified successfully",
+                        "token": token.get('access'),
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "user_id": user.id,
+                    },
+                    status=status.HTTP_200_OK)
             elif otp_record.otp != otp_code:
                 logger.warning(f"Invalid OTP against user: {email}")
                 return Response(
@@ -295,7 +288,7 @@ class OTPRetryView(generics.CreateAPIView):
     """
     Handles resending OTP to the user's email.
     """
-    serializer_class = VerifyOTPSerializer
+    serializer_class = OTPVerificationSerializer
 
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
@@ -343,10 +336,16 @@ class GoogleOAuthSignInView(generics.GenericAPIView):
             return Response(data={"error": "An unexpected error occurred. Please try again later."},
                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 # Chat Views
+class ChatViewSet(viewsets.ModelViewSet):
+    queryset = Chat.objects.all()
+    serializer_class = ChatSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    lookup_field = 'id'
 
 
-class ChatCreationView (generics.CreateAPIView):
+class ChatCreateView(generics.CreateAPIView):
     """
     Creates a new Chat instance for a given user.
     """
@@ -359,13 +358,15 @@ class ChatCreationView (generics.CreateAPIView):
             token = auth_header.split(" ")[1]
             prompt = request.data.get('prompt')
             response = request.data.get('response')
+            conversation_id = request.data.get('conversation_id')
             try:
                 data = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
                 if data:
                     try:
                         user_id = data.get("user_id")
                         user = User.objects.get(id=user_id)
-                        chat = Chat(user=user, prompt=prompt, response=response)
+                        conversation = Conversation.objects.get(id=conversation_id)
+                        chat = Chat(user=user, prompt=prompt, response=response, conversation=conversation)
                         chat.save()
                     except User.DoesNotExist:
                         return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -378,38 +379,78 @@ class ChatCreationView (generics.CreateAPIView):
             return Response({"error": "Invalid token header"}, status=401)
 
 
-class UserChatsListView (generics.ListAPIView):
+class ChatListView(APIView):
     """
-    Retrieves all chats for the authenticated user.
+    Retrieves a list of Chat instances and their associated conversation details for a given conversation ID.
     """
-    serializer_class = ChatSerializer
+    permission_classes = [AllowAny]
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                name='conversation_id',
+                in_=openapi.IN_QUERY,
+                description="ID of the conversation to filter chats",
+                type=openapi.TYPE_STRING,
+                required=True
+            )
+        ]
+    )
     def get(self, request, *args, **kwargs):
-        try:
-            user = request.user
-            if user.is_anonymous:
-                return Response({"error": "Authentication credentials were not provided."},
-                                status=status.HTTP_401_UNAUTHORIZED)
-            chats = Chat.objects.filter(user=user)
-            serializer = self.get_serializer(chats, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response(data={"error": e}, status=status.HTTP_400_BAD_REQUEST)
+        # Retrieve the conversation_id from query parameters
+        conversation_id = request.query_params.get('conversation_id')
+
+        # Validate that conversation_id is provided
+        if not conversation_id:
+            raise ValidationError({"error": "conversation_id query parameter is required."})
+
+        # Retrieve the conversation
+        conversation = get_object_or_404(Conversation, id=conversation_id)
+
+        # Retrieve chats associated with the conversation
+        chats = Chat.objects.filter(conversation_id=conversation_id)
+
+        # Serialize conversation and chat data
+        conversation_data = ConversationSerializer(conversation).data
+        chats_data = ChatSerializer(chats, many=True).data
+
+        # Combine and return the response
+        response_data = {
+            "conversation": conversation_data,
+            "chats": chats_data
+        }
+        return Response(response_data)
+
+
+class ConversationHistoryView(generics.ListAPIView):
+    """
+    Fetch all chats for the currently logged-in user.
+    """
+    serializer_class = ConversationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Use the currently logged-in user
+        user = self.request.user
+        return Conversation.objects.filter(user=user)
+
 
 # Livekit Views
-
-
 class GenerateLiveKitTokenView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
         manual_parameters=[
             openapi.Parameter(
-                name='room', in_=openapi.IN_QUERY, description="Room name", type=openapi.TYPE_STRING, required=False
+                name='room', in_=openapi.IN_QUERY, description="Room name", type=openapi.TYPE_STRING, required=True
+            ),
+            openapi.Parameter(
+                name='conversation_id', in_=openapi.IN_QUERY, description="Conversation id", type=openapi.TYPE_STRING,
+                required=True
             ),
             openapi.Parameter(
                 name='identity', in_=openapi.IN_QUERY, description="User identity", type=openapi.TYPE_STRING,
-                required=False
+                required=True
             )
         ]
     )
@@ -418,21 +459,137 @@ class GenerateLiveKitTokenView(APIView):
             api_key = settings.LIVEKIT_API_KEY
             api_secret = settings.LIVEKIT_API_SECRET
             room_name = request.query_params.get('room')
+            conversation_id = request.query_params.get('conversation_id')
             identity = request.query_params.get('identity')
-            if not room_name or not identity:
+            if not all([room_name, conversation_id, identity]):
                 return Response(
-                    {"error": "Both 'room' and 'identity' parameters are required."},
-                    status=400
+                    {"error": "Parameters 'conversation_name', 'room', and 'identity' are required."},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
+            current_user = User.objects.get(email=self.request.user)
+            generated_room_name = f"{room_name}-{generate_random_code()}-conversation_id{conversation_id}"
             token = api.AccessToken(api_key, api_secret) \
                 .with_identity(identity) \
                 .with_name("Tranqui AI Assistant") \
                 .with_grants(
                 api.VideoGrants(
                     room_join=True,
-                    room=room_name + generate_random_code(),
+                    room=generated_room_name,
                 )
             )
             return Response({"Livekit access token": token.to_jwt()})
         except Exception as e:
             return Response(data={"error": e}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# Conversation Views
+class ConversationCreateView(APIView):
+    """
+    Create a new Conversation for the currently logged-in user.
+    The 'name' field is passed as a query parameter.
+    """
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                'name',
+                openapi.IN_QUERY,
+                description='The name of the conversation.',
+                type=openapi.TYPE_STRING,
+                required=True
+            )
+        ]
+    )
+    def post(self, request, *args, **kwargs):
+        # Ensure the user is authenticated
+        if not request.user.is_authenticated:
+            raise ValidationError("User is not authenticated.")
+
+        # Fetch the 'name' from query params
+        conversation_name = request.query_params.get('name')
+        if not conversation_name:
+            raise ValidationError("The 'name' parameter is required.")
+
+        conversation_data = request.data
+        conversation_data['name'] = conversation_name
+        conversation_data['user'] = request.user.id  # Associate the conversation with the logged-in user
+
+        serializer = ConversationSerializer(data=conversation_data)
+        if serializer.is_valid():
+            serializer.save(user=request.user)  # Ensure the user remains the same
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ConversationListView(APIView):
+    """
+    Fetch all conversations for the currently logged-in user.
+    """
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        conversations = Conversation.objects.filter(user=user)
+        serializer = ConversationSerializer(conversations, many=True)
+        return Response(serializer.data)
+
+
+class ConversationDetailView(APIView):
+    """
+    Retrieve, update, or delete a conversation for the currently logged-in user.
+    """
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_object(self, conversation_id):
+        return get_object_or_404(Conversation, id=conversation_id, user=self.request.user)
+
+    def get(self, request, conversation_id, *args, **kwargs):
+        conversation = self.get_object(conversation_id)
+        serializer = ConversationSerializer(conversation)
+        return Response(serializer.data)
+
+    def put(self, request, conversation_id, *args, **kwargs):
+        conversation = self.get_object(conversation_id)
+        serializer = ConversationSerializer(conversation, data=request.data, partial=False)
+        if serializer.is_valid():
+            serializer.save(user=request.user)  # Ensure the user remains the same
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, conversation_id, *args, **kwargs):
+        conversation = self.get_object(conversation_id)
+        serializer = ConversationSerializer(conversation, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save(user=request.user)  # Ensure the user remains the same
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, conversation_id, *args, **kwargs):
+        conversation = self.get_object(conversation_id)
+        conversation.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class FacebookOAuthSignInView(generics.GenericAPIView):
+    serializer_class = FacebookSignInSerializer
+
+    def post(self, request, *args, **kwargs):
+        try:
+            serializer = self.get_serializer(data=request.data)
+            if serializer.is_valid():
+                user = serializer.create_or_update_user()
+                return Response({"message": "Login successful", "user_id": user.id}, status=status.HTTP_200_OK)
+            else:
+                return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except HTTPError as e:
+            logger.error(f"HTTP error during Facebook sign-in: {e}")
+            return Response(data={"error": f"HTTP error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+        except ValidationError as e:
+            logger.error(f"Validation error: {e}")
+            return Response(data={"error": "Invalid data received"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Unexpected error during Facebook sign-in: {e}")
+            return Response(data={"error": "An unexpected error occurred. Please try again later."},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
