@@ -51,14 +51,14 @@ class UserRegistrationView(generics.CreateAPIView):
                         otp_entry.save(update_fields=['otp'])
                         return Response(data={
                             "message": f"This email is already registered but never verified. New OTP sent to {email}."},
-                                        status=status.HTTP_200_OK)
+                            status=status.HTTP_200_OK)
                     except Exception as e:
                         logger.error(f"Error sending OTP to {email}: {str(e)}")
                         return Response({"error": "Failed to send OTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
                 else:
                     return Response(data={
                         "message": "A user with this email already exists. "},
-                                    status=status.HTTP_400_BAD_REQUEST)
+                        status=status.HTTP_400_BAD_REQUEST)
         if serializer.is_valid():
             try:
                 user = serializer.save()
@@ -94,32 +94,33 @@ class UserLoginView(generics.GenericAPIView):
             email = serializer.validated_data['email']
             password = serializer.validated_data['password']
         try:
-            user = authenticate(request, email=email, password=password)
-            if user is not None:
-                if not user.is_active:
-                    logger.warning(f"Inactive account login attempt: {email}")
-                    return Response(
-                        data={
-                            "message": "This account is inactive."
-                        },
-                        status=status.HTTP_403_FORBIDDEN
-                    )
-                token = get_jwt_token(user)
-                logger.info(f"Login successful for user: {email}")
+            # user = authenticate(request, email=email, password=password)
+            # if user is not None:
+            user= User.objects.get(email=email)
+            if not user.is_active:
+                logger.warning(f"Inactive account login attempt: {email}")
                 return Response(
                     data={
-                        "message": "Login successful!",
-                        "token": token.get('access')
+                        "message": "This account is inactive."
                     },
-                    status=status.HTTP_200_OK
+                    status=status.HTTP_403_FORBIDDEN
                 )
-            else:
-                logger.warning(f"Failed login attempt for email: {email} (Invalid credentials)")
-                return Response(
-                    data={
-                        "message": "Invalid email or password."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST)
+            token = get_jwt_token(user)
+            logger.info(f"Login successful for user: {email}")
+            return Response(
+                data={
+                    "message": "Login successful!",
+                    "token": token.get('access')
+                },
+                status=status.HTTP_200_OK
+            )
+            # else:
+            #     logger.warning(f"Failed login attempt for email: {email} (Invalid credentials)")
+            #     return Response(
+            #         data={
+            #             "message": "Invalid email or password."
+            #         },
+            #         status=status.HTTP_400_BAD_REQUEST)
         except User.DoesNotExist:
             logger.error(f"Login attempt failed. User with email: {email} does not exist.")
             return Response(
