@@ -32,50 +32,58 @@ import facebook
 class UserRegistrationView(generics.CreateAPIView):
     """
     Handles user registration via POST requests.
-
-    Features:
-    - Validates email uniqueness.
-    - Sends OTP for unverified users.
-    - Creates a new user and sends OTP for verification.
     """
-    serializer_class = UserRegistrationSerializer
+    serializer_class = RegisterSerializer
     permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         email = request.data.get('email')
-
         if email:
-            user = User.objects.filter(email=email).values('is_verified').first()
-            if user and not user['is_verified']:
-                return handle_existing_unverified_user(email)
-            elif user:
-                return Response(
-                    {"message": "A user with this email already exists."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
+            user = User.objects.filter(email=email).first()
+            if user:
+                if not user.is_verified:
+                    otp_code = generate_otp()
+                    try:
+                        send_verification_email(email, otp_code)
+                        otp_entry, created = OTP.objects.get_or_create(email=email)
+                        otp_entry.otp = otp_code
+                        otp_entry.save(update_fields=['otp'])
+                        return Response(data={
+                            "message": f"This email is already registered but never verified. New OTP sent to {email}."},
+                                        status=status.HTTP_200_OK)
+                    except Exception as e:
+                        logger.error(f"Error sending OTP to {email}: {str(e)}")
+                        return Response({"error": "Failed to send OTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                else:
+                    return Response(data={
+                        "message": "A user with this email already exists. "},
+                                    status=status.HTTP_400_BAD_REQUEST)
         if serializer.is_valid():
             try:
-                return register_user(serializer, email)
-            except SMTPException as e:
-                logger.error(f"Error sending email: {e}")
-                return Response({"error": "Failed to send OTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-            except Exception as e:
-                logger.error(f"Unexpected error during registration: {e}")
+                user = serializer.save()
+                otp_code = generate_otp()
+                send_verification_email(email, otp_code)
+                OTP.objects.create(email=email, otp=otp_code)
                 return Response(
-                    {"error": "An unexpected error occurred. Please try again later."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    {"message": f"OTP sent to {email}"},
+                    status=status.HTTP_201_CREATED
                 )
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                logger.error(f"Error during registration: {str(e)}")
+                return Response(
+                    {"error": "An error occurred while registering. Please try again later."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
+        else:
+            return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class UserLoginView(generics.GenericAPIView):
     """
     Handles user login.
     """
-    serializer_class = UserLoginSerializer
+    serializer_class = LoginSerializer
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -88,9 +96,6 @@ class UserLoginView(generics.GenericAPIView):
         try:
             user = authenticate(request, email=email, password=password)
             if user is not None:
-                print(f"email: {email}, password: {password}")
-            user = User.objects.get(email=email)
-            if user is not None and check_password(password, user.password):
                 if not user.is_active:
                     logger.warning(f"Inactive account login attempt: {email}")
                     return Response(
@@ -104,9 +109,6 @@ class UserLoginView(generics.GenericAPIView):
                 return Response(
                     data={
                         "message": "Login successful!",
-                        "first_name": user.first_name,
-                        "last_name": user.last_name,
-                        "user_id": user.id,
                         "token": token.get('access')
                     },
                     status=status.HTTP_200_OK

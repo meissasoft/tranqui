@@ -4,12 +4,12 @@ from .utils import get_google_user_info, get_facebook_user_info
 from .models import User, OTP, Chat, Conversation
 
 
-class UserRegistrationSerializer(serializers.ModelSerializer):
+class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=6)
 
     class Meta:
         model = User
-        fields = ['email', 'password']
+        fields = ['email', 'password', 'first_name', 'last_name']
 
     def validate_username(self, value):
         """Ensure the username is unique."""
@@ -25,15 +25,38 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create a new user with a hashed password."""
+        username = f"{validated_data['first_name']} {validated_data['last_name']}"
         user = User(**validated_data)
         user.set_password(validated_data['password'])
         user.save()
         return user
 
 
-class UserLoginSerializer(serializers.Serializer):
+# Serializer for handling user login
+class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, min_length=6)
+    password = serializers.CharField(write_only=True)
+
+
+    def validate(self, attrs):
+        """Validate user credentials."""
+        email = attrs.get('email')
+        password = attrs.get('password')
+        try:
+            user = User.objects.filter(email=email).first()
+            if user is None:
+                raise serializers.ValidationError("Invalid email or password.")
+            if not user.check_password(password):
+                raise serializers.ValidationError("Invalid email or password.")
+            if not user.is_active:
+                raise serializers.ValidationError("User account is inactive.")
+        except User.DoesNotExist:
+            raise serializers.ValidationError("User with this email does not exist.")
+        except Exception as e:
+            raise serializers.ValidationError(f"An unexpected error occurred: {str(e)}")
+        attrs['user'] = user
+        return attrs
+
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
