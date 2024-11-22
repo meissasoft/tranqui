@@ -1,3 +1,5 @@
+from smtplib import SMTPException
+
 import jwt
 from django.db.models import Count
 from django.shortcuts import get_object_or_404
@@ -9,11 +11,11 @@ from drf_yasg.utils import swagger_auto_schema
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.hashers import check_password
-from django.db import transaction, DatabaseError
+from django.db import transaction, DatabaseError, IntegrityError
 from rest_framework import generics, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, NotAuthenticated
-from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
+from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView, GenericAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.views import APIView
 from rest_framework import status
@@ -21,14 +23,20 @@ from rest_framework.response import Response
 from .serializers import *
 from .models import *
 from .utils import *
+import facebook
 
 
 # Auth views
 
 
-class UserRegistrationView(generics.ListCreateAPIView):
+class UserRegistrationView(generics.CreateAPIView):
     """
     Handles user registration via POST requests.
+
+    Features:
+    - Validates email uniqueness.
+    - Sends OTP for unverified users.
+    - Creates a new user and sends OTP for verification.
     """
     serializer_class = UserRegistrationSerializer
     permission_classes = [AllowAny]
@@ -36,108 +44,65 @@ class UserRegistrationView(generics.ListCreateAPIView):
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         email = request.data.get('email')
+
         if email:
-            user = User.objects.filter(email=email).first()
-            if user:
-                if not user.is_verified:
-                    otp_code = generate_otp()
-                    try:
-                        send_verification_email(email, otp_code)
-                        otp_entry, created = OTP.objects.get_or_create(email=email)
-                        otp_entry.otp = otp_code
-                        otp_entry.save(update_fields=['otp'])
-                        return Response(data={
-                            "message": f"This email is already registered but never verified. New OTP sent to {email}."},
-                            status=status.HTTP_200_OK)
-                    except Exception as e:
-                        logger.error(f"Error sending OTP to {email}: {str(e)}")
-                        return Response({"error": "Failed to send OTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-                else:
-                    return Response(data={
-                        "message": "A user with this email already exists. "},
-                        status=status.HTTP_400_BAD_REQUEST)
+            user = User.objects.filter(email=email).values('is_verified').first()
+            if user and not user['is_verified']:
+                return handle_existing_unverified_user(email)
+            elif user:
+                return Response(
+                    {"message": "A user with this email already exists."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
         if serializer.is_valid():
             try:
-                user = serializer.save()
-                otp_code = generate_otp()
-                send_verification_email(email, otp_code)
-                OTP.objects.create(email=email, otp=otp_code)
-                return Response(
-                    {"message": f"OTP sent to {email}"},
-                    status=status.HTTP_201_CREATED
-                )
+                return register_user(serializer, email)
+            except SMTPException as e:
+                logger.error(f"Error sending email: {e}")
+                return Response({"error": "Failed to send OTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             except Exception as e:
-                logger.error(f"Error during registration: {str(e)}")
+                logger.error(f"Unexpected error during registration: {e}")
                 return Response(
-                    {"error": "An error occurred while registering. Please try again later."},
-                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                    {"error": "An unexpected error occurred. Please try again later."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
-        else:
-            return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class UserLoginView(generics.GenericAPIView):
+class UserLoginView(GenericAPIView):
     """
     Handles user login.
     """
     serializer_class = UserLoginSerializer
 
     def post(self, request, *args, **kwargs):
+        # Validate request data using the serializer
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
-            error_message = "Invalid email or password."
-            return Response(data={"error": error_message}, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            email = serializer.validated_data['email']
-            password = serializer.validated_data['password']
-        try:
-            print(f"email: {email}, password: {password}")
-            user = User.objects.get(email=email)
-            if user is not None and check_password(password, user.password):
+            return handle_invalid_credentials()
 
-                if not user.is_active:
-                    logger.warning(f"Inactive account login attempt: {email}")
-                    return Response(
-                        data={
-                            "message": "This account is inactive."
-                        },
-                        status=status.HTTP_403_FORBIDDEN
-                    )
-                token = get_jwt_token(user)
-                logger.info(f"Login successful for user: {email}")
-                return Response(
-                    data={
-                        "message": "Login successful!",
-                        "first_name": user.first_name,
-                        "last_name": user.last_name,
-                        "user_id": user.id,
-                        "token": token.get('access')
-                    },
-                    status=status.HTTP_200_OK
-                )
-            else:
-                logger.warning(f"Failed login attempt for email: {email} (Invalid credentials)")
-                return Response(
-                    data={
-                        "message": "Invalid email or password."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST)
+        email = serializer.validated_data['email']
+        password = serializer.validated_data['password']
+
+        # Attempt to authenticate user
+        try:
+            user = get_user_by_email(email)
+            if not check_user_password(password, user.password):
+                return handle_invalid_credentials()
+
+            if not user.is_active:
+                return handle_inactive_account(email)
+
+            # Generate JWT token for the user and return response
+            token = generate_jwt_token(user)
+            return handle_successful_login(user, token)
+
         except User.DoesNotExist:
-            logger.error(f"Login attempt failed. User with email: {email} does not exist.")
-            return Response(
-                data={
-                    "message": "User does not exist."
-                },
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return handle_user_not_found(email)
         except Exception as e:
-            logger.error(f"An unexpected error occurred during login for {email}: {str(e)}")
-            return Response(
-                data={
-                    "message": "An error occurred while trying to log in."
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return handle_unexpected_error(email, e)
 
 
 class UserProfileUpdateView(generics.UpdateAPIView):
@@ -147,18 +112,31 @@ class UserProfileUpdateView(generics.UpdateAPIView):
     """
     serializer_class = UserProfileSerializer
     http_method_names = ['put']
+    permission_classes = [IsAuthenticated]
 
-    def put(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data, instance=request.user)
-        if serializer.is_valid():
+    def update(self, request, *args, **kwargs):
+        """
+        Overriding the `update()` method to handle custom profile update logic.
+        """
+        try:
+            instance = self.get_object()
+            serializer = self.get_serializer(instance, data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            # Handle atomic transaction and update logic
             with transaction.atomic():
                 user = serializer.save()
                 if 'password' in serializer.validated_data:
                     user.set_password(serializer.validated_data['password'])
                     user.save()
-            return Response({"message": "Profile updated successfully!"}, status=status.HTTP_200_OK)
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"message": "Profile updated successfully!"}, status=status.HTTP_200_OK)
+        except Exception as e:
+            # Handle any unexpected exceptions
+            logger.error(f"Unexpected error while updating profile for {request.user.email}: {str(e)}")
+            return Response(
+                {"error": "An unexpected error occurred while updating your profile. Please try again later."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class PasswordResetRequestView(generics.UpdateAPIView):
@@ -579,8 +557,15 @@ class FacebookOAuthSignInView(generics.GenericAPIView):
         try:
             serializer = self.get_serializer(data=request.data)
             if serializer.is_valid():
-                user = serializer.create_or_update_user()
-                return Response({"message": "Login successful", "user_id": user.id}, status=status.HTTP_200_OK)
+                # user = serializer.create_or_update_user()
+                # return Response({"message": "Login successful", "user_id": user.id}, status=status.HTTP_200_OK)
+                print("hello", serializer.validated_data.get("token"))
+                graph = facebook.GraphAPI(access_token=serializer.validated_data.get("token"))
+                print("graph", graph.access_token)
+                profile = graph.request('/me?fields=id,name,email')
+                print("graph", profile)
+                print("hey")
+                return profile
             else:
                 return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except HTTPError as e:
@@ -588,6 +573,7 @@ class FacebookOAuthSignInView(generics.GenericAPIView):
             return Response(data={"error": f"HTTP error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
         except ValidationError as e:
             logger.error(f"Validation error: {e}")
+
             return Response(data={"error": "Invalid data received"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             logger.error(f"Unexpected error during Facebook sign-in: {e}")

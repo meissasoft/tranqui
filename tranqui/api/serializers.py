@@ -62,15 +62,9 @@ class ConversationSerializer(serializers.ModelSerializer):
         model = Conversation
         fields = '__all__'
 
+
 class FacebookSignInSerializer(serializers.Serializer):
     token = serializers.CharField()
-
-    def validate_token(self, value):
-        # Validate the Facebook token and retrieve user info
-        user_info = get_facebook_user_info(value)
-        if not user_info:
-            raise ValidationError("Invalid Facebook token.")
-        return value
 
     def create_or_update_user(self):
         # Extract user info from the validated token

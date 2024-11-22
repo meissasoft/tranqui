@@ -81,10 +81,15 @@ async def entrypoint(ctx: JobContext):
     ]
 
     # Choose a random greeting message
+    conversation_id = None
     chosen_greeting = random.choice(greetings)
     room_name = ctx.room.name
-    conversation_id = int(room_name.split('-')[1].replace("conversation_id", ""))
-    # conversation_id = 1
+    parts = room_name.split('-')
+    for part in parts:
+        if part.startswith("conversation_id"):
+            conversation_id = int(part.replace("conversation_id", ""))
+            break  # Stop looping once conversation_id is found
+    # conversation_id = room_name.split('-')[1].replace("conversation_id", "")
     conversation_history = await fetch_chat_history(conversation_id)
     chats = conversation_history.get("chats", [])
     conversation_details = conversation_history.get("conversation")
