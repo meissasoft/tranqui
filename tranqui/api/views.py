@@ -71,38 +71,69 @@ class UserRegistrationView(generics.CreateAPIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class UserLoginView(GenericAPIView):
+class UserLoginView(generics.GenericAPIView):
     """
     Handles user login.
     """
     serializer_class = UserLoginSerializer
 
     def post(self, request, *args, **kwargs):
-        # Validate request data using the serializer
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
-            return handle_invalid_credentials()
-
-        email = serializer.validated_data['email']
-        password = serializer.validated_data['password']
-
-        # Attempt to authenticate user
+            error_message = "Invalid email or password."
+            return Response(data={"error": error_message}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            email = serializer.validated_data['email']
+            password = serializer.validated_data['password']
         try:
-            user = get_user_by_email(email)
-            if not check_user_password(password, user.password):
-                return handle_invalid_credentials()
-
-            if not user.is_active:
-                return handle_inactive_account(email)
-
-            # Generate JWT token for the user and return response
-            token = generate_jwt_token(user)
-            return handle_successful_login(user, token)
-
+            user = authenticate(request, email=email, password=password)
+            if user is not None:
+                print(f"email: {email}, password: {password}")
+            user = User.objects.get(email=email)
+            if user is not None and check_password(password, user.password):
+                if not user.is_active:
+                    logger.warning(f"Inactive account login attempt: {email}")
+                    return Response(
+                        data={
+                            "message": "This account is inactive."
+                        },
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+                token = get_jwt_token(user)
+                logger.info(f"Login successful for user: {email}")
+                return Response(
+                    data={
+                        "message": "Login successful!",
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "user_id": user.id,
+                        "token": token.get('access')
+                    },
+                    status=status.HTTP_200_OK
+                )
+            else:
+                logger.warning(f"Failed login attempt for email: {email} (Invalid credentials)")
+                return Response(
+                    data={
+                        "message": "Invalid email or password."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST)
         except User.DoesNotExist:
-            return handle_user_not_found(email)
+            logger.error(f"Login attempt failed. User with email: {email} does not exist.")
+            return Response(
+                data={
+                    "message": "User does not exist."
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
         except Exception as e:
-            return handle_unexpected_error(email, e)
+            logger.error(f"An unexpected error occurred during login for {email}: {str(e)}")
+            return Response(
+                data={
+                    "message": "An error occurred while trying to log in."
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class UserProfileUpdateView(generics.UpdateAPIView):
