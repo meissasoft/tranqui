@@ -9,7 +9,26 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['email', 'first_name', 'last_name', 'password']
+        fields = ['email', 'password']
+
+    def validate_username(self, value):
+        """Ensure the username is unique."""
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError("Username already exists.")
+        return value
+
+    def validate_email(self, value):
+        """Ensure the email is unique."""
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("Email already exists.")
+        return value
+
+    def create(self, validated_data):
+        """Create a new user with a hashed password."""
+        user = User(**validated_data)
+        user.set_password(validated_data['password'])
+        user.save()
+        return user
 
 
 class UserLoginSerializer(serializers.Serializer):
