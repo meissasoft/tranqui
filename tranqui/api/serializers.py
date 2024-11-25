@@ -11,21 +11,9 @@ class RegisterSerializer(serializers.ModelSerializer):
         model = User
         fields = ['email', 'password', 'first_name', 'last_name']
 
-    def validate_username(self, value):
-        """Ensure the username is unique."""
-        if User.objects.filter(username=value).exists():
-            raise serializers.ValidationError("Username already exists.")
-        return value
-
-    def validate_email(self, value):
-        """Ensure the email is unique."""
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("Email already exists.")
-        return value
-
     def create(self, validated_data):
         """Create a new user with a hashed password."""
-        username = f"{validated_data['first_name']} {validated_data['last_name']}"
+        username = f"{validated_data['email']}"
         user = User(**validated_data)
         user.set_password(validated_data['password'])
         user.save()
@@ -36,26 +24,6 @@ class RegisterSerializer(serializers.ModelSerializer):
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
-
-    def validate(self, attrs):
-        """Validate user credentials."""
-        email = attrs.get('email')
-        password = attrs.get('password')
-        try:
-            user = User.objects.filter(email=email).first()
-            if user is None:
-                raise serializers.ValidationError("Invalid email or password.")
-            if not user.check_password(password):
-                raise serializers.ValidationError("Invalid email or password.")
-            if not user.is_active:
-                raise serializers.ValidationError("User account is inactive.")
-        except User.DoesNotExist:
-            raise serializers.ValidationError("User with this email does not exist.")
-        except Exception as e:
-            raise serializers.ValidationError(f"An unexpected error occurred: {str(e)}")
-        attrs['user'] = user
-        return attrs
-
 
 
 class UserProfileSerializer(serializers.ModelSerializer):

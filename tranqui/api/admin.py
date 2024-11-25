@@ -7,7 +7,7 @@ class ChatAdmin(admin.ModelAdmin):
 
 
 class OTPAdmin(admin.ModelAdmin):
-    list_display = ('id', 'email', 'otp', 'id', 'created_at')
+    list_display = ('id', 'email', 'otp', 'created_at')
 
 
 class ConversationAdmin(admin.ModelAdmin):

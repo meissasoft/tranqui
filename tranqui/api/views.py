@@ -61,7 +61,10 @@ class UserRegistrationView(generics.CreateAPIView):
                         status=status.HTTP_400_BAD_REQUEST)
         if serializer.is_valid():
             try:
-                user = serializer.save()
+                user = serializer.save(
+                    username=serializer.validated_data['email'],
+                    is_verified=False
+                )
                 otp_code = generate_otp()
                 send_verification_email(email, otp_code)
                 OTP.objects.create(email=email, otp=otp_code)
@@ -94,14 +97,18 @@ class UserLoginView(generics.GenericAPIView):
             email = serializer.validated_data['email']
             password = serializer.validated_data['password']
         try:
-            # user = authenticate(request, email=email, password=password)
-            # if user is not None:
-            user= User.objects.get(email=email)
-            if not user.is_active:
-                logger.warning(f"Inactive account login attempt: {email}")
+            user = User.objects.get(email=email)
+            if not check_password(password, user.password):
                 return Response(
                     data={
-                        "message": "This account is inactive."
+                        "message": "Invalid password."
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            if not user.is_verified:
+                return Response(
+                    data={
+                        "message": "This account is unverified."
                     },
                     status=status.HTTP_403_FORBIDDEN
                 )
@@ -328,6 +335,7 @@ class OTPRetryView(generics.CreateAPIView):
 
 class GoogleOAuthSignInView(generics.GenericAPIView):
     serializer_class = GoogleSignInSerializer
+    permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
         try:
