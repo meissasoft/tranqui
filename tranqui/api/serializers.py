@@ -50,14 +50,30 @@ class OTPVerificationSerializer(serializers.Serializer):
 
 
 class GoogleSignInSerializer(serializers.Serializer):
-    token = serializers.CharField()
+    # token = serializers.CharField()
 
     def validate_token(self, value):
-        # Validate the Google token and retrieve user info
+        """Validate the Google token by making a request to Google's API."""
         user_info = get_google_user_info(value)
-        if not user_info:
-            raise ValidationError("Invalid Google token.")
+        if not user_info.get('email'):
+            raise ValidationError("Unable to retrieve email from Google account.")
+        if not user_info.get('email_verified'):
+            raise ValidationError("Google email is not verified.")
         return value
+
+    def create_or_update_google_user(self, user_info):
+        """Create a new user if they don't exist, otherwise update the existing user."""
+        email = user_info['email']
+        username = user_info.get('given_name', '') + user_info.get('family_name', '')
+        username = username.strip() or email.split('@')[0]
+
+        user, created = User.objects.get_or_create(
+            email=email,
+            defaults={
+                'password': User.objects.generate_random_password()
+            }
+        )
+        return user
 
 
 class ChatSerializer(serializers.ModelSerializer):

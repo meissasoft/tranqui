@@ -333,28 +333,95 @@ class OTPRetryView(generics.CreateAPIView):
             return Response({"message": "OTP resent successfully."}, status=status.HTTP_200_OK)
 
 
+# class GoogleOAuthSignInView(generics.GenericAPIView):
+#     serializer_class = GoogleSignInSerializer
+#     permission_classes = [AllowAny]
+#
+#     def post(self, request, *args, **kwargs):
+#         try:
+#             serializer = self.get_serializer(data=request.data)
+#             if serializer.is_valid():
+#                 user = serializer.create_or_update_google_user()
+#                 return Response({"message": "Login successful", "user_id": user.id}, status=status.HTTP_200_OK)
+#             else:
+#                 return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+#         except HTTPError as e:
+#             logger.error(f"HTTP error during Google sign-in: {e}")
+#             return Response(data={"error": f"HTTP error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+#         except ValidationError as e:
+#             logger.error(f"Validation error: {e}")
+#             return Response(data={"error": "Invalid data received"}, status=status.HTTP_400_BAD_REQUEST)
+#         except Exception as e:
+#             logger.error(f"Unexpected error during Google sign-in: {e}")
+#             return Response(data={"error": "An unexpected error occurred. Please try again later."},
+#                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class GoogleOAuthSignInView(generics.GenericAPIView):
     serializer_class = GoogleSignInSerializer
     permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
         try:
-            serializer = self.get_serializer(data=request.data)
-            if serializer.is_valid():
-                user = serializer.create_or_update_user()
-                return Response({"message": "Login successful", "user_id": user.id}, status=status.HTTP_200_OK)
+            # Step 1: Extract the token from the Authorization header
+            auth_header = request.data.get('token', None)
+            if not auth_header:
+                return Response(data={"error": "Authorization header is missing."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # The token should be in the form "Bearer <access_token>"
+            # if not auth_header.startswith('Bearer '):
+            #     return Response(data={"error": "Invalid Authorization header format."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # token = auth_header.split(' ')[1]
+
+            # Step 2: Validate the token with Google's OAuth2 API
+            user_info = self.get_google_user_info(auth_header)
+            print(user_info)
+
+            # Step 3: Use the validated user info to create or update the user
+            if user_info:
+                serializer = self.get_serializer(data=user_info)
+                if serializer.is_valid():
+                    user = serializer.create_or_update_google_user(user_info)
+                    token = get_jwt_token(user)
+
+                    return Response({
+                        "message": "Login successful",
+                        "user_id": user.id,
+                        "token": token.get("access")
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             else:
-                return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                return Response(data={"error": "Failed to retrieve user info from Google."}, status=status.HTTP_400_BAD_REQUEST)
+
         except HTTPError as e:
             logger.error(f"HTTP error during Google sign-in: {e}")
             return Response(data={"error": f"HTTP error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
         except ValidationError as e:
             logger.error(f"Validation error: {e}")
-            return Response(data={"error": "Invalid data received"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(data={"error": "Invalid data received."}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             logger.error(f"Unexpected error during Google sign-in: {e}")
-            return Response(data={"error": "An unexpected error occurred. Please try again later."},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(data={"error": "An unexpected error occurred. Please try again later."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get_google_user_info(self, token):
+        """
+        Validates the provided Google OAuth token and fetches user information.
+        """
+        try:
+            # Step 1: Call Google's token info endpoint to verify the token
+            google_url = f"https://www.googleapis.com/oauth2/v3/tokeninfo?id_token={token}"
+            response = requests.get(google_url)
+            if response.status_code == 200:
+                return response.json()  # Return user info if the token is valid
+            else:
+                logger.error(f"Google API returned error: {response.json()}")
+                return None
+        except Exception as e:
+            logger.error(f"Error during token verification: {e}")
+            return None
+
 
 
 # Chat Views
