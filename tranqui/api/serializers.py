@@ -64,15 +64,25 @@ class GoogleSignInSerializer(serializers.Serializer):
     def create_or_update_google_user(self, user_info):
         """Create a new user if they don't exist, otherwise update the existing user."""
         email = user_info['email']
+        first_name = user_info['given_name']
+        last_name = user_info['family_name']
         username = user_info.get('given_name', '') + user_info.get('family_name', '')
         username = username.strip() or email.split('@')[0]
 
         user, created = User.objects.get_or_create(
             email=email,
+            first_name=first_name,
+            last_name=last_name,
+            is_verified=True,
             defaults={
-                'password': User.objects.generate_random_password()
+                'username': email,
             }
         )
+        print(created)
+        if created:
+            user.set_password(User.objects.generate_random_password())
+
+            user.save()
         return user
 
 
