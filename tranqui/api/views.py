@@ -1,32 +1,19 @@
-from smtplib import SMTPException
-
 import jwt
-from django.db.models import Count
+from django.contrib.auth.hashers import check_password
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from livekit import api
-from requests import HTTPError
 from jwt import ExpiredSignatureError, InvalidTokenError
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
-from django.conf import settings
-from django.contrib.auth import authenticate
-from django.contrib.auth.hashers import check_password
-from django.db import transaction, DatabaseError, IntegrityError
 from rest_framework import generics, viewsets
-from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, NotAuthenticated
-from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView, GenericAPIView
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
-from rest_framework.views import APIView
-from rest_framework import status
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from .serializers import *
 from .models import *
 from .utils import *
-import facebook
-
-
-# Auth views
 
 
 class UserRegistrationView(generics.CreateAPIView):
@@ -121,13 +108,6 @@ class UserLoginView(generics.GenericAPIView):
                 },
                 status=status.HTTP_200_OK
             )
-            # else:
-            #     logger.warning(f"Failed login attempt for email: {email} (Invalid credentials)")
-            #     return Response(
-            #         data={
-            #             "message": "Invalid email or password."
-            #         },
-            #         status=status.HTTP_400_BAD_REQUEST)
         except User.DoesNotExist:
             logger.error(f"Login attempt failed. User with email: {email} does not exist.")
             return Response(
@@ -240,8 +220,6 @@ class PasswordResetVerificationView(generics.GenericAPIView):
             return Response({"error": "An unexpected error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# OTP views
-
 class OTPVerificationView(generics.CreateAPIView):
     """
     Handles OTP verification for user accounts.
@@ -309,7 +287,7 @@ class OTPRetryView(generics.CreateAPIView):
     """
     serializer_class = OTPVerificationSerializer
 
-    def post(self, request):
+    def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
             return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -333,68 +311,29 @@ class OTPRetryView(generics.CreateAPIView):
             return Response({"message": "OTP resent successfully."}, status=status.HTTP_200_OK)
 
 
-class GoogleOAuthSignInView(generics.GenericAPIView):
+class GoogleAuthView(generics.GenericAPIView):
     serializer_class = GoogleSignInSerializer
     permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
         try:
-            # Step 1: Extract the token from the Authorization header
             auth_header = request.data.get('token', None)
             if not auth_header:
                 return Response(data={"error": "Authorization header is missing."}, status=status.HTTP_400_BAD_REQUEST)
-            user_info = self.get_google_user_info(auth_header)
-            if user_info:
-                serializer = self.get_serializer(data=user_info)
-                if serializer.is_valid():
-                    user = create_or_update_user(
-                        email=user_info["email"],
-                        first_name=user_info["given_name"],
-                        last_name=user_info["family_name"]
-                    )
-                    token = get_jwt_token(user)
-
-                    return Response({
-                        "message": "Login successful",
-                        "user_id": user.id,
-                        "token": token.get("access")
-                    }, status=status.HTTP_200_OK)
-                else:
-                    return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            else:
-                return Response(data={"error": "Failed to retrieve user info from Google."},
-                                status=status.HTTP_400_BAD_REQUEST)
-
-        except HTTPError as e:
-            logger.error(f"HTTP error during Google sign-in: {e}")
-            return Response(data={"error": f"HTTP error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
-        except ValidationError as e:
-            logger.error(f"Validation error: {e}")
-            return Response(data={"error": "Invalid data received."}, status=status.HTTP_400_BAD_REQUEST)
+            result = handle_google_auth(auth_header)
+            if result["error"]:
+                return Response(data={"error": result["message"]}, status=result["status"])
+            return Response({
+                "message": result["message"],
+                "user_id": result.get("user_id"),
+                "token": result.get("token")
+            }, status=result["status"])
         except Exception as e:
             logger.error(f"Unexpected error during Google sign-in: {e}")
             return Response(data={"error": "An unexpected error occurred. Please try again later."},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def get_google_user_info(self, token):
-        """
-        Validates the provided Google OAuth token and fetches user information.
-        """
-        try:
-            # Step 1: Call Google's token info endpoint to verify the token
-            google_url = f"https://www.googleapis.com/oauth2/v3/tokeninfo?id_token={token}"
-            response = requests.get(google_url)
-            if response.status_code == 200:
-                return response.json()  # Return user info if the token is valid
-            else:
-                logger.error(f"Google API returned error: {response.json()}")
-                return None
-        except Exception as e:
-            logger.error(f"Error during token verification: {e}")
-            return None
+                            status=status.HTTP_400_BAD_REQUEST)
 
 
-# Chat Views
 class ChatViewSet(viewsets.ModelViewSet):
     queryset = Chat.objects.all()
     serializer_class = ChatSerializer
@@ -454,24 +393,13 @@ class ChatListView(APIView):
         ]
     )
     def get(self, request, *args, **kwargs):
-        # Retrieve the conversation_id from query parameters
         conversation_id = request.query_params.get('conversation_id')
-
-        # Validate that conversation_id is provided
         if not conversation_id:
             raise ValidationError({"error": "conversation_id query parameter is required."})
-
-        # Retrieve the conversation
         conversation = get_object_or_404(Conversation, id=conversation_id)
-
-        # Retrieve chats associated with the conversation
         chats = Chat.objects.filter(conversation_id=conversation_id)
-
-        # Serialize conversation and chat data
         conversation_data = ConversationSerializer(conversation).data
         chats_data = ChatSerializer(chats, many=True).data
-
-        # Combine and return the response
         response_data = {
             "conversation": conversation_data,
             "chats": chats_data
@@ -479,20 +407,6 @@ class ChatListView(APIView):
         return Response(response_data)
 
 
-class ConversationHistoryView(generics.ListAPIView):
-    """
-    Fetch all chats for the currently logged-in user.
-    """
-    serializer_class = ConversationSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        # Use the currently logged-in user
-        user = self.request.user
-        return Conversation.objects.filter(user=user)
-
-
-# Livekit Views
 class GenerateLiveKitTokenView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -539,7 +453,6 @@ class GenerateLiveKitTokenView(APIView):
             return Response(data={"error": e}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# Conversation Views
 class ConversationCreateView(APIView):
     """
     Create a new Conversation for the currently logged-in user.
@@ -611,7 +524,7 @@ class ConversationDetailView(APIView):
         conversation = self.get_object(conversation_id)
         serializer = ConversationSerializer(conversation, data=request.data, partial=False)
         if serializer.is_valid():
-            serializer.save(user=request.user)  # Ensure the user remains the same
+            serializer.save(user=request.user)
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -619,7 +532,7 @@ class ConversationDetailView(APIView):
         conversation = self.get_object(conversation_id)
         serializer = ConversationSerializer(conversation, data=request.data, partial=True)
         if serializer.is_valid():
-            serializer.save(user=request.user)  # Ensure the user remains the same
+            serializer.save(user=request.user)
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -629,45 +542,31 @@ class ConversationDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class FacebookOAuthSignInView(generics.GenericAPIView):
+class ConversationHistoryView(generics.ListAPIView):
+    """
+    Fetch all chats for the currently logged-in user.
+    """
+    serializer_class = ConversationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Use the currently logged-in user
+        user = self.request.user
+        return Conversation.objects.filter(user=user)
+
+
+class FacebookAuthView(generics.GenericAPIView):
     serializer_class = FacebookSignInSerializer
 
     def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
         try:
-            serializer = self.get_serializer(data=request.data)
-            if serializer.is_valid():
-                graph = facebook.GraphAPI(access_token=serializer.validated_data["token"])
-                profile = graph.request(path='/me?fields=id,name,email,first_name,last_name')
-                if 'email' not in profile:
-                    return Response(
-                        {"message": f"Email permission not granted or missing for username: {profile.get('name')}."},
-                        status=status.HTTP_400_BAD_REQUEST)
-                else:
-                    user = create_or_update_user(
-                        username=profile.get('name'),
-                        email=profile.get('email'),
-                        first_name=profile.get('first_name'),
-                        last_name=profile.get('last_name')
-                    )
-                    token = get_jwt_token(user)
-
-                    return Response({
-                        "message": "Login successful",
-                        "user_id": user.id,
-                        "token": token.get("access")
-                    }, status=status.HTTP_200_OK)
-            else:
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except HTTPError as e:
-            logger.error(f"HTTP error during Facebook sign-in: {e}")
-            return Response({"error": f"HTTP error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
-        except ValidationError as e:
-            logger.error(f"Validation error: {e}")
-            return Response({"error": "Invalid data received"}, status=status.HTTP_400_BAD_REQUEST)
-        except facebook.GraphAPIError as e:
-            logger.error(f"Facebook API error: {e}")
-            return Response({"error": f"Facebook API error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+            serializer.is_valid(raise_exception=True)
+            result = handle_facebook_auth(serializer.validated_data['token'])
+            return Response({
+                "message": result["message"],
+                "user_id": result.get("user_id"),
+                "token": result.get("token")
+            }, status=result["status"])
         except Exception as e:
-            logger.error(f"Unexpected error during Facebook sign-in: {e}")
-            return Response({"error": "An unexpected error occurred. Please try again later."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)

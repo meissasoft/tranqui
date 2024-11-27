@@ -5,12 +5,12 @@ urlpatterns = [
     # Auth URLs
     path('auth/register/', UserRegistrationView.as_view(), name='register_user'),
     path('auth/login/', UserLoginView.as_view(), name='user_login'),
-    path('auth/profile/update', UserProfileUpdateView.as_view(), name='update_profile'),
+    # path('auth/profile/update', UserProfileUpdateView.as_view(), name='update_profile'),
     path('auth/otp/verify/', OTPVerificationView.as_view(), name='verify_otp'),
     path('auth/password/reset/request', PasswordResetRequestView.as_view(), name='reset_password'),
     path('auth/password/reset/verify/', PasswordResetVerificationView.as_view(), name='verify_reset_code'),
-    path('auth/social/google/', GoogleOAuthSignInView.as_view(), name='google_oauth_signin'),
-    path('auth/social/facebook/', FacebookOAuthSignInView.as_view(), name='facebook_oauth_signin'),
+    path('auth/social/google/', GoogleAuthView.as_view(), name='google_oauth_signin'),
+    path('auth/social/facebook/', FacebookAuthView.as_view(), name='facebook_oauth_signin'),
 
     # Chat URLs
     path('chats/create/', ChatCreateView.as_view(), name='create_chat'),

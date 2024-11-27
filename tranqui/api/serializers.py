@@ -1,6 +1,4 @@
 from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
-from .utils import get_google_user_info
 from .models import User, Chat, Conversation
 
 
@@ -12,7 +10,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         fields = ['email', 'password', 'first_name', 'last_name']
 
     def create(self, validated_data):
-        """Create a new user with a hashed password."""
         username = f"{validated_data['email']}"
         user = User(**validated_data)
         user.set_password(validated_data['password'])
@@ -20,7 +17,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
 
-# Serializer for handling user login
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
@@ -45,21 +41,8 @@ class PasswordChangeConfirmationSerializer(serializers.Serializer):
 
 
 class OTPVerificationSerializer(serializers.Serializer):
-    email = serializers.EmailField()
     otp = serializers.CharField(max_length=6)
-
-
-class GoogleSignInSerializer(serializers.Serializer):
-    # token = serializers.CharField()
-
-    def validate_token(self, value):
-        """Validate the Google token by making a request to Google's API."""
-        user_info = get_google_user_info(value)
-        if not user_info.get('email'):
-            raise ValidationError("Unable to retrieve email from Google account.")
-        if not user_info.get('email_verified'):
-            raise ValidationError("Google email is not verified.")
-        return value
+    email = serializers.EmailField()
 
 
 class ChatSerializer(serializers.ModelSerializer):
@@ -74,5 +57,13 @@ class ConversationSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class FacebookSignInSerializer(serializers.Serializer):
+class SocialAuthTokenSerializer(serializers.Serializer):
     token = serializers.CharField()
+
+
+class GoogleSignInSerializer(SocialAuthTokenSerializer):
+    pass
+
+
+class FacebookSignInSerializer(SocialAuthTokenSerializer):
+    pass
