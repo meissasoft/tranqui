@@ -333,30 +333,6 @@ class OTPRetryView(generics.CreateAPIView):
             return Response({"message": "OTP resent successfully."}, status=status.HTTP_200_OK)
 
 
-# class GoogleOAuthSignInView(generics.GenericAPIView):
-#     serializer_class = GoogleSignInSerializer
-#     permission_classes = [AllowAny]
-#
-#     def post(self, request, *args, **kwargs):
-#         try:
-#             serializer = self.get_serializer(data=request.data)
-#             if serializer.is_valid():
-#                 user = serializer.create_or_update_google_user()
-#                 return Response({"message": "Login successful", "user_id": user.id}, status=status.HTTP_200_OK)
-#             else:
-#                 return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-#         except HTTPError as e:
-#             logger.error(f"HTTP error during Google sign-in: {e}")
-#             return Response(data={"error": f"HTTP error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
-#         except ValidationError as e:
-#             logger.error(f"Validation error: {e}")
-#             return Response(data={"error": "Invalid data received"}, status=status.HTTP_400_BAD_REQUEST)
-#         except Exception as e:
-#             logger.error(f"Unexpected error during Google sign-in: {e}")
-#             return Response(data={"error": "An unexpected error occurred. Please try again later."},
-#                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 class GoogleOAuthSignInView(generics.GenericAPIView):
     serializer_class = GoogleSignInSerializer
     permission_classes = [AllowAny]
@@ -367,22 +343,15 @@ class GoogleOAuthSignInView(generics.GenericAPIView):
             auth_header = request.data.get('token', None)
             if not auth_header:
                 return Response(data={"error": "Authorization header is missing."}, status=status.HTTP_400_BAD_REQUEST)
-
-            # The token should be in the form "Bearer <access_token>"
-            # if not auth_header.startswith('Bearer '):
-            #     return Response(data={"error": "Invalid Authorization header format."}, status=status.HTTP_400_BAD_REQUEST)
-
-            # token = auth_header.split(' ')[1]
-
-            # Step 2: Validate the token with Google's OAuth2 API
             user_info = self.get_google_user_info(auth_header)
-            print(user_info)
-
-            # Step 3: Use the validated user info to create or update the user
             if user_info:
                 serializer = self.get_serializer(data=user_info)
                 if serializer.is_valid():
-                    user = serializer.create_or_update_google_user(user_info)
+                    user = create_or_update_user(
+                        email=user_info["email"],
+                        first_name=user_info["given_name"],
+                        last_name=user_info["family_name"]
+                    )
                     token = get_jwt_token(user)
 
                     return Response({
@@ -393,7 +362,8 @@ class GoogleOAuthSignInView(generics.GenericAPIView):
                 else:
                     return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             else:
-                return Response(data={"error": "Failed to retrieve user info from Google."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(data={"error": "Failed to retrieve user info from Google."},
+                                status=status.HTTP_400_BAD_REQUEST)
 
         except HTTPError as e:
             logger.error(f"HTTP error during Google sign-in: {e}")
@@ -403,7 +373,8 @@ class GoogleOAuthSignInView(generics.GenericAPIView):
             return Response(data={"error": "Invalid data received."}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             logger.error(f"Unexpected error during Google sign-in: {e}")
-            return Response(data={"error": "An unexpected error occurred. Please try again later."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(data={"error": "An unexpected error occurred. Please try again later."},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def get_google_user_info(self, token):
         """
@@ -421,7 +392,6 @@ class GoogleOAuthSignInView(generics.GenericAPIView):
         except Exception as e:
             logger.error(f"Error during token verification: {e}")
             return None
-
 
 
 # Chat Views
@@ -666,25 +636,38 @@ class FacebookOAuthSignInView(generics.GenericAPIView):
         try:
             serializer = self.get_serializer(data=request.data)
             if serializer.is_valid():
-                # user = serializer.create_or_update_user()
-                # return Response({"message": "Login successful", "user_id": user.id}, status=status.HTTP_200_OK)
-                print("hello", serializer.validated_data.get("token"))
-                graph = facebook.GraphAPI(access_token=serializer.validated_data.get("token"))
-                print("graph", graph.access_token)
-                profile = graph.request('/me?fields=id,name,email')
-                print("graph", profile)
-                print("hey")
-                return profile
+                graph = facebook.GraphAPI(access_token=serializer.validated_data["token"])
+                profile = graph.request(path='/me?fields=id,name,email,first_name,last_name')
+                if 'email' not in profile:
+                    return Response(
+                        {"message": f"Email permission not granted or missing for username: {profile.get('name')}."},
+                        status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    user = create_or_update_user(
+                        username=profile.get('name'),
+                        email=profile.get('email'),
+                        first_name=profile.get('first_name'),
+                        last_name=profile.get('last_name')
+                    )
+                    token = get_jwt_token(user)
+
+                    return Response({
+                        "message": "Login successful",
+                        "user_id": user.id,
+                        "token": token.get("access")
+                    }, status=status.HTTP_200_OK)
             else:
-                return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except HTTPError as e:
             logger.error(f"HTTP error during Facebook sign-in: {e}")
-            return Response(data={"error": f"HTTP error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": f"HTTP error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
         except ValidationError as e:
             logger.error(f"Validation error: {e}")
-
-            return Response(data={"error": "Invalid data received"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Invalid data received"}, status=status.HTTP_400_BAD_REQUEST)
+        except facebook.GraphAPIError as e:
+            logger.error(f"Facebook API error: {e}")
+            return Response({"error": f"Facebook API error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             logger.error(f"Unexpected error during Facebook sign-in: {e}")
-            return Response(data={"error": "An unexpected error occurred. Please try again later."},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": "An unexpected error occurred. Please try again later."},
+                            status=status.HTTP_400_BAD_REQUEST)

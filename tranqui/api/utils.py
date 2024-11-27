@@ -11,6 +11,7 @@ import random
 from django.db import transaction
 from rest_framework.response import Response
 from rest_framework import status
+
 from .models import OTP, User
 
 load_dotenv()
@@ -96,16 +97,6 @@ def generate_random_code() -> str:
     return f"{random_code}"
 
 
-def get_facebook_user_info(token):
-    url = f"https://graph.facebook.com/me?fields=id,name,email&access_token={token}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        logger.error(f"Failed to fetch Facebook user info: {response.text}")
-        return None
-
-
 @transaction.atomic
 def register_user(serializer, email):
     user = serializer.save()
@@ -128,11 +119,13 @@ def handle_existing_unverified_user(email):
         status=status.HTTP_200_OK
     )
 
+
 def get_user_by_email(email):
     """
     Retrieve the user by their email.
     """
     return User.objects.get(email=email)
+
 
 def check_user_password(password, hashed_password):
     """
@@ -140,11 +133,13 @@ def check_user_password(password, hashed_password):
     """
     return check_password(password, hashed_password)
 
+
 def generate_jwt_token(user):
     """
     Generate and return JWT token for the authenticated user.
     """
     return get_jwt_token(user)
+
 
 def handle_invalid_credentials():
     """
@@ -152,11 +147,13 @@ def handle_invalid_credentials():
     """
     return {"message": "Invalid email or password."}, status.HTTP_400_BAD_REQUEST
 
+
 def handle_inactive_account(email):
     """
     Handle login attempt for inactive accounts.
     """
     return {"message": "This account is inactive."}, status.HTTP_403_FORBIDDEN
+
 
 def handle_successful_login(user, token):
     """
@@ -170,14 +167,38 @@ def handle_successful_login(user, token):
         "token": token.get('access')
     }, status.HTTP_200_OK
 
+
 def handle_user_not_found(email):
     """
     Handle case where user is not found.
     """
     return {"message": "User does not exist."}, status.HTTP_404_NOT_FOUND
 
+
 def handle_unexpected_error(email, exception):
     """
     Handle unexpected errors during login.
     """
     return {"message": "An error occurred while trying to log in."}, status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+def create_or_update_user(first_name, last_name, email, username=None):
+    """Create a new user if they don't exist, otherwise update the existing user."""
+    if username is None:
+        username = email
+
+    user, created = User.objects.get_or_create(
+        email=email,
+        first_name=first_name,
+        last_name=last_name,
+        is_verified=True,
+        defaults={
+            'username': email,
+        }
+    )
+    print(created)
+    if created:
+        user.set_password(User.objects.generate_random_password())
+
+        user.save()
+    return user
