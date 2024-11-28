@@ -92,6 +92,7 @@ async def entrypoint(ctx: JobContext):
     # conversation_id = room_name.split('-')[1].replace("conversation_id", "")
     conversation_history = await fetch_chat_history(conversation_id)
     chats = conversation_history.get("chats", [])
+    print("conversation_history: ", conversation_history)
     conversation_details = conversation_history.get("conversation")
     # conversation_details = False
 
