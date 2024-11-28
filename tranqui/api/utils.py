@@ -95,13 +95,16 @@ def handle_facebook_auth(token: str) -> Dict[str, any]:
                 "message": error_message,
                 "status": status.HTTP_400_BAD_REQUEST
             }
-        user = create_or_get_user(
-            email=profile.get('email'),
-            username=profile.get('name'),
-            first_name=profile.get('first_name'),
-            last_name=profile.get('last_name'),
-            is_verified=True
-        )
+        if User.objects.filter(email=profile.get('email')).first():
+            user = User.objects.filter(email=profile.get('email')).first()
+        else:
+            user = create_or_get_user(
+                email=profile.get('email'),
+                username=profile.get('name'),
+                first_name=profile.get('first_name'),
+                last_name=profile.get('last_name'),
+                is_verified=True
+            )
         token = get_jwt_token(user)
         return {
             "error": False,
