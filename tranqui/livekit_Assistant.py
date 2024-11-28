@@ -105,7 +105,7 @@ async def entrypoint(ctx: JobContext):
             initial_ctx.append(
                 role="system",
                 text="You are now reviewing previous messages to understand the context of the upcoming conversation."
-                     " Please provide a brief summary of the previous chats before continuing with the new conversation."
+                     "Please provide a brief summary of the previous chats before continuing with the new conversation."
             )
         for chat in filtered_chats:
             for prompt, response in chat.items():
