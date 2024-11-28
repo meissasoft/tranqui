@@ -141,18 +141,14 @@ def handle_google_auth(token: str) -> Dict[str, any]:
             }
         user_info = response.json()
         if User.objects.filter(email=user_info["email"]).first():
-            logger.error(f"User with email : {user_info['email']} already exists")
-            return {
-                "error": False,
-                "message": "User with this email already exists",
-                "status": status.HTTP_200_OK
-            }
-        user = create_or_get_user(
-            email=user_info["email"],
-            first_name=user_info["given_name"],
-            last_name=user_info["family_name"],
-            is_verified=True
-        )
+            user = User.objects.filter(email=user_info["email"]).first()
+        else:
+            user = create_or_get_user(
+                email=user_info["email"],
+                first_name=user_info["given_name"],
+                last_name=user_info["family_name"],
+                is_verified=True
+            )
         token = get_jwt_token(user)
         return {
             "error": False,
