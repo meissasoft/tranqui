@@ -54,6 +54,7 @@ def calculate_valid_responses(chats: List[Dict]) -> List[Dict[str, str]]:
 
 
 async def entrypoint(ctx: JobContext):
+    chats_available: bool = False
     initial_ctx = llm.ChatContext().append(
         role="system",
         text=random.choice(settings.INITIAL_SYSTEM_PROMPT),
@@ -92,22 +93,24 @@ async def entrypoint(ctx: JobContext):
     # conversation_id = room_name.split('-')[1].replace("conversation_id", "")
     conversation_history = await fetch_chat_history(conversation_id)
     chats = conversation_history.get("chats", [])
+    if len(chats) > 0:
+        chats_available = True
     print("conversation_history: ", conversation_history)
     conversation_details = conversation_history.get("conversation")
     # conversation_details = False
 
     filtered_chats = calculate_valid_responses(chats)
-    if filtered_chats:
-        initial_ctx.append(
-            role="system",
-            text="You are now reviewing previous messages to understand the context of the upcoming conversation."
-                 " Please provide a brief summary of the previous chats before continuing with the new conversation."
-        )
-    for chat in filtered_chats:
-
-        for prompt, response in chat.items():
-            initial_ctx.append(role="user", text=prompt)
-            initial_ctx.append(role="assistant", text=response)
+    if chats_available:
+        if filtered_chats:
+            initial_ctx.append(
+                role="system",
+                text="You are now reviewing previous messages to understand the context of the upcoming conversation."
+                     " Please provide a brief summary of the previous chats before continuing with the new conversation."
+            )
+        for chat in filtered_chats:
+            for prompt, response in chat.items():
+                initial_ctx.append(role="user", text=prompt)
+                initial_ctx.append(role="assistant", text=response)
     assistant = VoiceAssistant(
         vad=silero.VAD.load(),
         stt=deepgram.STT(model=settings.STT_MODEL, language=settings.STT_LANGUAGE),
@@ -117,7 +120,7 @@ async def entrypoint(ctx: JobContext):
         chat_ctx=initial_ctx,
     )
     assistant.start(ctx.room)
-    if conversation_details:
+    if conversation_details and chats_available:
         name = conversation_details.get("name", "your previous conversation")
         await assistant.say(source=f"Let's continue our previous conversation titled '{name}'.",
                             allow_interruptions=True)
