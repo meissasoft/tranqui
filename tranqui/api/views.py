@@ -69,7 +69,7 @@ class UserLoginView(generics.GenericAPIView):
         email = serializer.validated_data['email']
         password = serializer.validated_data['password']
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.filter(email=email).first()
             if not check_password(password, user.password):
                 return Response(data={"message": "Invalid password."}, status=status.HTTP_403_FORBIDDEN)
             if not user.is_verified:
