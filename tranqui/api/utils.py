@@ -10,7 +10,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from dotenv import load_dotenv
 import random
 from rest_framework import status
-from .models import User
+from .models import User, OTP
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -45,6 +45,16 @@ def send_verification_email(email: str, otp_code: str) -> None:
 def generate_otp() -> str:
     """Generates a 6-digit OTP."""
     return str(random.randint(a=100000, b=999999))
+
+
+def send_otp(email: str) -> None:
+    try:
+        otp_code = generate_otp()
+        send_verification_email(email=email, otp_code=otp_code)
+        OTP.objects.update_or_create(email=email, defaults={'otp': otp_code})
+    except Exception as e:
+        logger.error(f"Error sending OTP to {email}: {str(e)}")
+        raise e
 
 
 def generate_random_code() -> str:

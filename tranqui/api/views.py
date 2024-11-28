@@ -24,47 +24,33 @@ class UserRegistrationView(generics.CreateAPIView):
     permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
         email = request.data.get('email')
-        if email:
-            user = User.objects.filter(email=email).first()
-            if user:
-                if not user.is_verified:
-                    otp_code = generate_otp()
-                    try:
-                        send_verification_email(email, otp_code)
-                        otp_entry, created = OTP.objects.get_or_create(email=email)
-                        otp_entry.otp = otp_code
-                        otp_entry.save(update_fields=['otp'])
-                        return Response(data={
-                            "message": f"This email is already registered but never verified. New OTP sent to {email}."},
-                            status=status.HTTP_200_OK)
-                    except Exception as e:
-                        logger.error(f"Error sending OTP to {email}: {str(e)}")
-                        return Response({"error": "Failed to send OTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-                else:
-                    return Response(data={
-                        "message": "A user with this email already exists. "},
-                        status=status.HTTP_400_BAD_REQUEST)
+        if not email:
+            return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+        user = User.objects.filter(email=email).first()
+        if user:
+            if not user.is_verified:
+                try:
+                    send_otp(email=email)
+                    return Response({
+                        "message": f"This email is already registered but never verified. New OTP sent to {email}."
+                    }, status=status.HTTP_200_OK)
+                except Exception as e:
+                    logger.error(f"Error sending OTP to {email}: {str(e)}")
+                    return Response({"error": "Failed to send OTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            else:
+                return Response(data={"message": "A user with this email already exists."},
+                                status=status.HTTP_400_BAD_REQUEST)
+        serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
             try:
-                user = serializer.save(
-                    username=serializer.validated_data['email'],
-                    is_verified=False
-                )
-                otp_code = generate_otp()
-                send_verification_email(email, otp_code)
-                OTP.objects.create(email=email, otp=otp_code)
-                return Response(
-                    {"message": f"OTP sent to {email}"},
-                    status=status.HTTP_201_CREATED
-                )
+                user = serializer.save(username=serializer.validated_data['email'], is_verified=False)
+                send_otp(email=email)
+                return Response({"message": f"OTP sent to {email}"}, status=status.HTTP_201_CREATED)
             except Exception as e:
                 logger.error(f"Error during registration: {str(e)}")
-                return Response(
-                    {"error": "An error occurred while registering. Please try again later."},
-                    status=status.HTTP_503_SERVICE_UNAVAILABLE
-                )
+                return Response({"error": f"An error occurred while registering. Please try again later: {e}"},
+                                status=status.HTTP_400_BAD_REQUEST)
         else:
             return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -74,86 +60,50 @@ class UserLoginView(generics.GenericAPIView):
     Handles user login.
     """
     serializer_class = LoginSerializer
+    permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
-            error_message = "Invalid email or password."
-            return Response(data={"error": error_message}, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            email = serializer.validated_data['email']
-            password = serializer.validated_data['password']
+            return Response(data={"error": "Invalid email or password."}, status=status.HTTP_400_BAD_REQUEST)
+        email = serializer.validated_data['email']
+        password = serializer.validated_data['password']
         try:
             user = User.objects.get(email=email)
             if not check_password(password, user.password):
-                return Response(
-                    data={
-                        "message": "Invalid password."
-                    },
-                    status=status.HTTP_403_FORBIDDEN
-                )
+                return Response(data={"message": "Invalid password."}, status=status.HTTP_403_FORBIDDEN)
             if not user.is_verified:
-                return Response(
-                    data={
-                        "message": "This account is unverified."
-                    },
-                    status=status.HTTP_403_FORBIDDEN
-                )
+                return Response(data={"message": "This account is unverified."}, status=status.HTTP_403_FORBIDDEN)
             token = get_jwt_token(user)
             logger.info(f"Login successful for user: {email}")
-            return Response(
-                data={
-                    "message": "Login successful!",
-                    "token": token.get('access')
-                },
-                status=status.HTTP_200_OK
-            )
+            return Response(data={"message": "Login successful!", "token": token.get('access')},
+                            status=status.HTTP_200_OK)
         except User.DoesNotExist:
             logger.error(f"Login attempt failed. User with email: {email} does not exist.")
-            return Response(
-                data={
-                    "message": "User does not exist."
-                },
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response(data={"message": "User does not exist."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             logger.error(f"An unexpected error occurred during login for {email}: {str(e)}")
-            return Response(
-                data={
-                    "message": "An error occurred while trying to log in."
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response(data={"message": "An error occurred while trying to log in."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
 
 class UserProfileUpdateView(generics.UpdateAPIView):
-    """
-    ProfileUpdateView allows authenticated users to update their profile details.
-    It handles HTTP PUT requests and expects a valid profile update payload.
-    """
     serializer_class = UserProfileSerializer
     http_method_names = ['put']
     permission_classes = [IsAuthenticated]
 
     def update(self, request, *args, **kwargs):
-        """
-        Overriding the `update()` method to handle custom profile update logic.
-        """
         try:
             instance = self.get_object()
             serializer = self.get_serializer(instance, data=request.data)
             serializer.is_valid(raise_exception=True)
-
-            # Handle atomic transaction and update logic
             with transaction.atomic():
                 user = serializer.save()
                 if 'password' in serializer.validated_data:
                     user.set_password(serializer.validated_data['password'])
                     user.save()
-
             return Response({"message": "Profile updated successfully!"}, status=status.HTTP_200_OK)
         except Exception as e:
-            # Handle any unexpected exceptions
             logger.error(f"Unexpected error while updating profile for {request.user.email}: {str(e)}")
             return Response(
                 {"error": "An unexpected error occurred while updating your profile. Please try again later."},
@@ -163,28 +113,17 @@ class UserProfileUpdateView(generics.UpdateAPIView):
 class PasswordResetRequestView(generics.UpdateAPIView):
     serializer_class = PasswordResetSerializer
     http_method_names = ['patch']
+    permission_classes = [AllowAny]
 
     def patch(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data['email']
         if serializer.is_valid():
-            otp_code = str(random.randint(a=100000, b=999999))  # Generate a 6-digit OTP
-            try:
-                send_verification_email(email, otp_code)
-                # OTP.objects.create(email=email, otp=otp_code)
-                OTP.objects.update_or_create(
-                    email=email,
-                    defaults={
-                        'otp': otp_code,
-                        'created_at': timezone.now()
-                    },
-                )
-                return Response({"message": f"OTP sent to email {email}"}, status=status.HTTP_201_CREATED)
-            except Exception as e:
-                return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            send_otp(email=email)
+            return Response({"message": f"OTP sent to email {email}"}, status=status.HTTP_201_CREATED)
         else:
-            return Response({"message": "Verify the OTP to proceed further."}, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class PasswordResetVerificationView(generics.GenericAPIView):
@@ -202,18 +141,17 @@ class PasswordResetVerificationView(generics.GenericAPIView):
             if not otp_record.is_valid():
                 logger.warning(f"OTP expired for email: {otp_record.email}")
                 return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
-            email = otp_record.email
-            user = User.objects.get(email=email)
+            user = User.objects.filter(email=otp_record.email).first()
             user.set_password(new_password)
             user.save()
             otp_record.delete()
-            logger.info(f"Password reset successfully for user: {email}")
+            logger.info(f"Password reset successfully for user: {otp_record.email}")
             return Response({"message": "Password has been updated successfully."}, status=status.HTTP_200_OK)
         except OTP.DoesNotExist:
             logger.warning("Invalid OTP provided.")
             return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
         except User.DoesNotExist:
-            logger.error(f"User not found for email: {email}")
+            logger.error(f"User not found for email: {otp_record.email}")
             return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             logger.error(f"An error occurred while resetting the password: {str(e)}")
@@ -238,44 +176,34 @@ class OTPVerificationView(generics.CreateAPIView):
             otp_record = OTP.objects.get(email=email)
             if not otp_record:
                 logger.warning(f"OTP not found in database against user: {email}")
-                return Response(
-                    data={
-                        "error": f"OTP not found in database against user: {email}"
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                return Response(data={"error": f"OTP not found in database against user: {email}"},
+                                status=status.HTTP_400_BAD_REQUEST
+                                )
             elif otp_record.otp == otp_code:
-                user = User.objects.get(email=email)
-                user.is_verified = True
-                user.save()
-                token = get_jwt_token(user)
-                otp_record.delete()
-                logger.info(f"OTP verified successfully for user: {email}")
-                return Response(
-                    data={
-                        "message": "OTP verified successfully",
-                        "token": token.get('access'),
-                        "first_name": user.first_name,
-                        "last_name": user.last_name,
-                        "user_id": user.id,
-                    },
-                    status=status.HTTP_200_OK)
+                user = User.objects.filter(email=email).first()
+                if user:
+                    user.is_verified = True
+                    user.save(update_fields=['is_verified'])
+                    token = get_jwt_token(user)
+                    if otp_record:
+                        otp_record.delete()
+                    logger.info(f"OTP verified successfully for user: {email}")
+                    return Response(data={
+                            "message": "OTP verified successfully",
+                            "token": token.get('access'),
+                            "first_name": user.first_name,
+                            "last_name": user.last_name,
+                            "user_id": user.id,
+                        },
+                        status=status.HTTP_200_OK)
             elif otp_record.otp != otp_code:
                 logger.warning(f"Invalid OTP against user: {email}")
-                return Response(
-                    data={
-                        "error": f"Invalid OTP against user: {email}"
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                return Response(data={"error": f"Invalid OTP against user: {email}"},status=status.HTTP_400_BAD_REQUEST)
         except OTP.DoesNotExist:
             logger.error(f"No OTP found for the provided email: {email}")
-            return Response(
-                data={
-                    "error": f"No OTP found for the provided email: {email}"
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response(data={"error": f"No OTP found for the provided email: {email}"},
+                            status=status.HTTP_400_BAD_REQUEST
+                            )
         except User.DoesNotExist:
             logger.error(f"User with email `{email}` does not exists")
             raise NotFound(f"User with email `{email}` does not exists")
@@ -300,13 +228,7 @@ class OTPRetryView(generics.CreateAPIView):
             if not user:
                 logger.error(f"No user found with the email: {email}")
                 return Response({"error": f"No user found with the email: {email}"}, status=status.HTTP_404_NOT_FOUND)
-            otp = OTP.objects.get(email=email)
-            if otp:
-                logger.info(f"Previous OTP: {otp.otp}")
-                new_otp = generate_otp()
-                otp.otp = new_otp
-                otp.save()
-                send_verification_email(email, new_otp)
+            send_otp(email=email)
             logger.info(f"New OTP resent successfully to email: {email}")
             return Response({"message": "OTP resent successfully."}, status=status.HTTP_200_OK)
 
@@ -332,13 +254,6 @@ class GoogleAuthView(generics.GenericAPIView):
             logger.error(f"Unexpected error during Google sign-in: {e}")
             return Response(data={"error": "An unexpected error occurred. Please try again later."},
                             status=status.HTTP_400_BAD_REQUEST)
-
-
-class ChatViewSet(viewsets.ModelViewSet):
-    queryset = Chat.objects.all()
-    serializer_class = ChatSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
-    lookup_field = 'id'
 
 
 class ChatCreateView(generics.CreateAPIView):
