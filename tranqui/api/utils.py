@@ -62,7 +62,7 @@ def generate_random_code() -> str:
     return f"{random_code}"
 
 
-def create_or_update_user(
+def create_or_get_user(
         first_name: str, last_name: str, email: str, is_verified: bool, username: str = None
 ) -> User:
     if username is None:
@@ -95,7 +95,7 @@ def handle_facebook_auth(token: str) -> Dict[str, any]:
                 "message": error_message,
                 "status": status.HTTP_400_BAD_REQUEST
             }
-        user = create_or_update_user(
+        user = create_or_get_user(
             email=profile.get('email'),
             username=profile.get('name'),
             first_name=profile.get('first_name'),
@@ -140,7 +140,14 @@ def handle_google_auth(token: str) -> Dict[str, any]:
                 "status": status.HTTP_400_BAD_REQUEST
             }
         user_info = response.json()
-        user = create_or_update_user(
+        if User.objects.filter(email=user_info["email"]).first():
+            logger.error(f"User with email : {user_info['email']} already exists")
+            return {
+                "error": False,
+                "message": "User with this email already exists",
+                "status": status.HTTP_200_OK
+            }
+        user = create_or_get_user(
             email=user_info["email"],
             first_name=user_info["given_name"],
             last_name=user_info["family_name"],

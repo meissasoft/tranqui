@@ -239,10 +239,10 @@ class GoogleAuthView(generics.GenericAPIView):
 
     def post(self, request, *args, **kwargs):
         try:
-            auth_header = request.data.get('token', None)
-            if not auth_header:
-                return Response(data={"error": "Authorization header is missing."}, status=status.HTTP_400_BAD_REQUEST)
-            result = handle_google_auth(auth_header)
+            token = request.data.get('token', None)
+            if not token:
+                return Response(data={"error": "Token is missing."}, status=status.HTTP_400_BAD_REQUEST)
+            result = handle_google_auth(token)
             if result["error"]:
                 return Response(data={"error": result["message"]}, status=result["status"])
             return Response({
