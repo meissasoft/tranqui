@@ -75,7 +75,7 @@ http://127.0.0.1:8000/swagger/
 When testing the API, ensure that an authentication token is included in the request headers.
 ```
 Authorization: <your_auth_token>
-```e
+```
 Token can be obtained after every successfull login and register
 
 **Note:** Ensure your PostgreSQL server is running and accessible before starting the project.
