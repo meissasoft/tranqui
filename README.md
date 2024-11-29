@@ -69,24 +69,8 @@ python livekit_Assistant.py start
 ```dtd
 http://127.0.0.1:8000/swagger/
 ```
-- To access ReDoc, navigate to
-```dtd
-http://127.0.0.1:8000/redoc/
-```
-## Chatbot API Access
 
-**WebSocket ChatBot API**
 
-To access the WebSocket ChatBot API, connect to the following WebSocket endpoint:
-```bash
-ws://127.0.0.1:8000/ws/chat/
-```
-Send a JSON object with a message prompt
-```json
-{
-   "prompt": "Your question here"
-}
-```
 ### Note for developers:
 When testing the API, ensure that an authentication token is included in the request headers.
 ```
