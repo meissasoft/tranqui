@@ -82,7 +82,7 @@ async def entrypoint(ctx: JobContext):
     ]
 
     # Choose a random greeting message
-    conversation_id = None
+    conversation_id = 0
     chosen_greeting = random.choice(greetings)
     room_name = ctx.room.name
     parts = room_name.split('-')
