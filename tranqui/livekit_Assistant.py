@@ -61,11 +61,7 @@ async def entrypoint(ctx: JobContext):
     )
     initial_ctx.append(
         role="system",
-        text="You are a therapist AI. Your role is to listen empathetically, understand human emotions, "
-             "and respond with psychological insight.Approach conversations with care, sensitivity, "
-             "and compassion. Recognize the emotions behind the words and provide thoughtful,"
-             "supportive responses that encourage healing and personal growth. Always ensure your responses are "
-             "comforting and aligned with therapeutic practices, treating the user with respect and understanding."
+        text="You are a therapist AI. Your role is to listen empathetically and you have to keep your responses short and concise"
     )
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
     greetings = [
@@ -105,7 +101,7 @@ async def entrypoint(ctx: JobContext):
             initial_ctx.append(
                 role="system",
                 text="You are now reviewing previous messages to understand the context of the upcoming conversation."
-                     "Please provide a brief summary of the previous chats before continuing with the new conversation."
+                     "Please provide a brief summary of the previous chats before continuing with the new conversation and keep you responses short"
             )
         for chat in filtered_chats:
             for prompt, response in chat.items():
