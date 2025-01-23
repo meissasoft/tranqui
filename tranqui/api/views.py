@@ -623,7 +623,7 @@ class CurrentUserConversationHistoryView(generics.ListCreateAPIView):
         print("user", user)
         auth_header = self.request.META.get("HTTP_AUTHORIZATION", None)
         if not auth_header:
-            auth_header = self.request.META.get("X-AUTHORIZATION", None)
+            auth_header = self.request.META.get("HTTP_X_AUTHORIZATION", None)
             if auth_header:
                 try:
                     # Assuming the token is a JWT token
