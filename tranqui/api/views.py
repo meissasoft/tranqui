@@ -594,7 +594,28 @@ class ConversationHistoryView(generics.ListAPIView):
     """
 
     serializer_class = ConversationSerializer
-    # permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Use the currently logged-in user
+        user = self.request.user
+        print("user", user)
+
+        # Log the incoming request and token information
+        auth_header = self.request.META.get("HTTP_AUTHORIZATION", None)
+        print("self.request.META.", self.request.META)
+        print("auth_header", auth_header)
+
+        return Conversation.objects.filter(user=user)
+
+
+class CurrentUserConversationHistoryView(generics.ListAPIView):
+    """
+    Fetch all chats for the currently logged-in user.
+    """
+
+    serializer_class = ConversationSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         # Use the currently logged-in user
