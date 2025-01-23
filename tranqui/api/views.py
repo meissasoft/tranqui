@@ -609,7 +609,7 @@ class ConversationHistoryView(generics.ListAPIView):
         return Conversation.objects.filter(user=user)
 
 
-class CurrentUserConversationHistoryView(generics.CreateAPIView):
+class CurrentUserConversationHistoryView(generics.ListCreateAPIView):
     """
     Fetch all chats for the currently logged-in user.
     """
