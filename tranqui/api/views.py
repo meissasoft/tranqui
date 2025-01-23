@@ -594,11 +594,12 @@ class ConversationHistoryView(generics.ListAPIView):
     """
 
     serializer_class = ConversationSerializer
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         # Use the currently logged-in user
         user = self.request.user
+        print("user", user)
 
         # Log the incoming request and token information
         auth_header = self.request.META.get("HTTP_AUTHORIZATION", None)
