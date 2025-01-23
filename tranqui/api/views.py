@@ -7,7 +7,7 @@ from jwt import ExpiredSignatureError, InvalidTokenError
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, viewsets
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, ValidationError, AuthenticationFailed
 from rest_framework.permissions import (
     AllowAny,
     IsAuthenticated,
@@ -609,21 +609,36 @@ class ConversationHistoryView(generics.ListAPIView):
         return Conversation.objects.filter(user=user)
 
 
-class CurrentUserConversationHistoryView(generics.ListAPIView):
+class CurrentUserConversationHistoryView(generics.CreateAPIView):
     """
     Fetch all chats for the currently logged-in user.
     """
 
     serializer_class = ConversationSerializer
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         # Use the currently logged-in user
         user = self.request.user
         print("user", user)
-
-        # Log the incoming request and token information
         auth_header = self.request.META.get("HTTP_AUTHORIZATION", None)
+        if not auth_header:
+            auth_header = self.request.META.get("X-AUTHORIZATION", None)
+            if auth_header:
+                try:
+                    # Assuming the token is a JWT token
+                    token = auth_header.split(" ")[1]
+                    decoded_token = jwt.decode(
+                        token, settings.SECRET_KEY, algorithms=["HS256"]
+                    )
+                    user_id = decoded_token.get("user_id")
+                    user = User.objects.get(id=user_id)
+                except (
+                    jwt.ExpiredSignatureError,
+                    jwt.InvalidTokenError,
+                    User.DoesNotExist,
+                ):
+                    raise AuthenticationFailed("Invalid token or user does not exist")
         print("self.request.META.", self.request.META)
         print("auth_header", auth_header)
 
