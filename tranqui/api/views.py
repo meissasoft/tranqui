@@ -632,7 +632,7 @@ class CurrentUserConversationHistoryView(generics.ListCreateAPIView):
                         token, settings.SECRET_KEY, algorithms=["HS256"]
                     )
                     user_id = decoded_token.get("user_id")
-                    user = User.objects.get(id=user_id)
+                    return Conversation.objects.filter(user=user_id)
                 except (
                     jwt.ExpiredSignatureError,
                     jwt.InvalidTokenError,
@@ -641,8 +641,6 @@ class CurrentUserConversationHistoryView(generics.ListCreateAPIView):
                     raise AuthenticationFailed("Invalid token or user does not exist")
         print("self.request.META.", self.request.META)
         print("auth_header", auth_header)
-
-        return Conversation.objects.filter(user=user)
 
 
 class FacebookAuthView(generics.GenericAPIView):
