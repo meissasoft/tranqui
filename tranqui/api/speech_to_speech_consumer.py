@@ -15,6 +15,8 @@ import random
 import asyncio
 import os
 import requests
+from openai import OpenAI
+
 
 logger = logging.getLogger(__name__)
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -35,7 +37,7 @@ async def get_user(username):
 
 def generate_random_session_id(length=10):
     """Generate a random session ID of the specified length."""
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+    return "".join(random.choices(string.ascii_letters + string.digits, k=length))
 
 
 class SpeechConsumer(AsyncWebsocketConsumer):
@@ -46,13 +48,15 @@ class SpeechConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
         """Handle WebSocket connection."""
-        self.session_id = self.scope['url_route']['kwargs'].get('session_id')
-        self.user = self.scope.get('user')
+        self.session_id = self.scope["url_route"]["kwargs"].get("session_id")
+        self.user = self.scope.get("user")
 
         if self.user is not None and self.user.is_authenticated:
             await self.accept()
             logger.info(f"User {self.user.username} connected via WebSocket.")
-            await self.send(text_data=json.dumps({"message": "WebSocket connection established"}))
+            await self.send(
+                text_data=json.dumps({"message": "WebSocket connection established"})
+            )
             greeting_message = self.get_greeting()
             await self.send(text_data=json.dumps({"message": greeting_message}))
         else:
@@ -117,40 +121,43 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                 logger.info(bytes_data)
                 print("bytes data received", flush=True)
                 print(bytes_data)
-                with open(INPUT_FILE_PATH, 'wb') as file:
+                with open(INPUT_FILE_PATH, "wb") as file:
                     file.write(bytes_data)
                 # transcribed_text = await self.transcribe_audio(INPUT_FILE_PATH)
-                deepgram_transcribed_text = await self.deepgram_transcribe_audio(INPUT_FILE_PATH)
+                deepgram_transcribed_text = await self.deepgram_transcribe_audio(
+                    INPUT_FILE_PATH
+                )
                 audio = True
-                text_data_json = {
-                    "prompt": deepgram_transcribed_text
-                }
+                text_data_json = {"prompt": deepgram_transcribed_text}
 
             elif bytes_data is None and text_data is not None:
                 logger.info("text data received")
                 text_data_json = json.loads(text_data)
             serializer_data = {
-                'session_id': self.session_id,
-                'prompt': text_data_json.get('prompt'),
+                "session_id": self.session_id,
+                "prompt": text_data_json.get("prompt"),
             }
             serializer = ChatRequestSerializer(data=serializer_data)
             serializer.is_valid(raise_exception=True)
-            response_content = await self.process_prompt(serializer.validated_data, user=self.user, audio=audio)
+            response_content = await self.process_prompt(
+                serializer.validated_data, user=self.user, audio=audio
+            )
             await self.send(text_data=json.dumps(response_content))
             print("Response sent to client:", response_content, flush=True)
 
-
         except json.JSONDecodeError:
             logger.error("Invalid JSON received.")
-            await self.send(text_data=json.dumps({'error': 'Invalid JSON format'}))
+            await self.send(text_data=json.dumps({"error": "Invalid JSON format"}))
         except Exception as e:
             logger.exception("Error in WebSocket receive method.")
-            await self.send(text_data=json.dumps({'error': 'An unexpected error occurred.'}))
+            await self.send(
+                text_data=json.dumps({"error": "An unexpected error occurred."})
+            )
 
     async def process_prompt(self, validated_data, user, audio):
         """Process the user prompt and send it to OpenAI API."""
         try:
-            prompt = validated_data['prompt']
+            prompt = validated_data["prompt"]
 
             session_id = self.session_id
             if session_id:
@@ -165,22 +172,24 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             try:
                 if audio:
                     response = client.chat.completions.create(
-                        model="gpt-3.5-turbo",
-                        messages=messages,
-                        stream=True
+                        model="gpt-3.5-turbo", messages=messages, stream=True
                     )
                     batch_count = 0
                     complete_response = ""
                     response_string = ""
                     for chunk in response:
                         if chunk.choices[0].delta.content is not None:
-                            response_string = response_string + chunk.choices[0].delta.content
+                            response_string = (
+                                response_string + chunk.choices[0].delta.content
+                            )
                             batch_count += 1
                             if batch_count >= BATCH_SIZE:
                                 try:
                                     await self.text_to_speech(response_string)
                                 except Exception as e:
-                                    logger.error(f"Speech to text conversion error: {str(e)}")
+                                    logger.error(
+                                        f"Speech to text conversion error: {str(e)}"
+                                    )
                                     return "Sorry, there was error  in converting speech to text."
                                 complete_response = complete_response + response_string
                                 response_string = ""
@@ -192,11 +201,12 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                     assistant_response = complete_response
                 else:
                     response = client.chat.completions.create(
-                        model="gpt-4o",
-                        messages=messages
+                        model="gpt-4o", messages=messages
                     )
                     response_dict = object_to_dict(response)
-                    assistant_response = response_dict['choices'][0]['message']['content']
+                    assistant_response = response_dict["choices"][0]["message"][
+                        "content"
+                    ]
                 if not session_id:
                     session_id = generate_random_session_id()
 
@@ -208,7 +218,9 @@ class SpeechConsumer(AsyncWebsocketConsumer):
                 return "Sorry, there was an issue in handling response."
 
             total_tokens = calculate_token_count(assistant_response)
-            await self.save_chat_response(user, prompt, assistant_response, session_id, total_tokens)
+            await self.save_chat_response(
+                user, prompt, assistant_response, session_id, total_tokens
+            )
             return assistant_response
         except KeyError as e:
             logger.error(f"Key error in process_prompt: {str(e)}")
@@ -225,15 +237,16 @@ class SpeechConsumer(AsyncWebsocketConsumer):
         print("data_content: ", data_content)
         try:
             transcription = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file
+                model="whisper-1", file=audio_file
             )
-            print('transcribed text from OPEN AI: ', transcription.text)
+            print("transcribed text from OPEN AI: ", transcription.text)
             return transcription.text
         except (Exception, openai.BadRequestError) as e:
             raise e
 
-    async def text_to_speech(self, text_chunk, model="tts-1", voice="alloy", buffer_size=BUFFER_SIZE):
+    async def text_to_speech(
+        self, text_chunk, model="tts-1", voice="alloy", buffer_size=BUFFER_SIZE
+    ):
         """Generate speech from text and send the audio data, also save it to a file."""
         try:
             with open(SPEECH_FILE_PATH, "ab") as audio_file:
@@ -285,25 +298,31 @@ class SpeechConsumer(AsyncWebsocketConsumer):
             response=response,
             session_id=session_id,
             created_at=timezone.now(),
-            total_tokens=total_tokens
+            total_tokens=total_tokens,
         )
         chat.save()
 
     async def deepgram_transcribe_audio(self, audio_file_path):
-        with open(audio_file_path, 'rb') as audio:
+        with open(audio_file_path, "rb") as audio:
             headers = {
-                'Authorization': f"Token {DEEPGRAM_API_KEY}",
-                'Content-Type': 'audio/wav',
+                "Authorization": f"Token {DEEPGRAM_API_KEY}",
+                "Content-Type": "audio/wav",
             }
             response = requests.post(DEEPGRAM_URL, headers=headers, data=audio)
             if response.status_code == 200:
-                transcribed_text = response.json().get('results', {}).get('channels', [])[0].get('alternatives', [])[
-                    0].get(
-                    'transcript', '')
+                transcribed_text = (
+                    response.json()
+                    .get("results", {})
+                    .get("channels", [])[0]
+                    .get("alternatives", [])[0]
+                    .get("transcript", "")
+                )
                 print("transcribed text from DEEP GRAM: ", transcribed_text)
                 return transcribed_text
             else:
-                raise Exception(f"Error in transcription from DEEP GRAM: {response.text}")
+                raise Exception(
+                    f"Error in transcription from DEEP GRAM: {response.text}"
+                )
 
 
 def object_to_dict(obj):
