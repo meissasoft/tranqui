@@ -39,4 +39,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD python -c "import livekit_Assistant; print('Assistant service is running')" || exit 1
 
 # Default command for LiveKit assistant
-CMD ["python", "livekit_Assistant.py", "start"] 
+CMD ["python", "tranqui/livekit_Assistant.py", "start"] 
