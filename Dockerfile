@@ -39,4 +39,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/ || exit 1
 
 # Default command for Django application
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "--timeout", "120", "tranqui.wsgi:application"] 
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"] 
