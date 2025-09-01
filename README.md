@@ -80,3 +80,6 @@ Token can be obtained after every successfull login and register
 
 **Note:** Ensure your PostgreSQL server is running and accessible before starting the project.
 
+
+
+<!-- Security scan triggered at 2025-09-01 23:42:10 -->
