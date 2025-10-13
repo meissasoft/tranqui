@@ -78,6 +78,7 @@ media/*
 instance/
 .webassets-cache
 
+temp_auto_push.bat
 # Scrapy stuff:
 .scrapy
 
@@ -143,7 +144,6 @@ dmypy.json
 .pyre/
 
 .DS_Store
-.vscode
 .dccache
 
 tests/
@@ -158,4 +158,5 @@ tests/
 *.pyc
 *.pyc
 #.mp3 files
-*.mp3
+*.mp3.gitignore
+temp_interactive_push.bat
