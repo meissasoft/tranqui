@@ -78,7 +78,6 @@ media/*
 instance/
 .webassets-cache
 
-temp_auto_push.bat
 # Scrapy stuff:
 .scrapy
 
@@ -159,4 +158,6 @@ tests/
 *.pyc
 #.mp3 files
 *.mp3.gitignore
+branch_structure.json
+temp_auto_push.bat
 temp_interactive_push.bat
